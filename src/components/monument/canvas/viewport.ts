@@ -66,10 +66,24 @@ export function createViewport(
   return vp;
 }
 
-/** Recenter the viewport on a cell, keeping the current scale, then clamp. */
-export function centerViewportOn(vp: ViewportState, cellX: number, cellY: number): void {
+/**
+ * Recenter the viewport on a cell, keeping the current scale, then clamp.
+ *
+ * `bottomInsetPx` is the height of anything overlapping the bottom of the
+ * canvas, in practice the selection tray, which on a phone covers close to half
+ * the grid. Centering on the geometric middle would then park the buyer's own
+ * words underneath it, which is exactly what they came to look at. Passing the
+ * inset centers within the band that is actually visible instead.
+ */
+export function centerViewportOn(
+  vp: ViewportState,
+  cellX: number,
+  cellY: number,
+  bottomInsetPx = 0,
+): void {
+  const visibleHeight = Math.max(1, vp.height - bottomInsetPx);
   vp.originX = cellX - vp.width / vp.scale / 2;
-  vp.originY = cellY - vp.height / vp.scale / 2;
+  vp.originY = cellY - visibleHeight / vp.scale / 2;
   clampViewport(vp);
 }
 

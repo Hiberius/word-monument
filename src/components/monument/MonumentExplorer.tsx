@@ -74,6 +74,19 @@ function clampPopupCoord(value: number, halfSize: number, containerSize: number 
   return Math.min(Math.max(value, min), max);
 }
 
+/** Height of the selection tray currently overlapping the bottom of the canvas.
+ *  On a phone it covers close to half the grid, so centering on the geometric
+ *  middle would hide the buyer's own words underneath it. Measured rather than
+ *  guessed because the tray grows with the number of selected cells. */
+function trayInsetPx(container: HTMLElement | null): number {
+  if (!container) return 0;
+  const tray = container.querySelector("[data-selection-tray]");
+  if (!(tray instanceof HTMLElement)) return 0;
+  const containerBottom = container.getBoundingClientRect().bottom;
+  const trayTop = tray.getBoundingClientRect().top;
+  return Math.max(0, Math.round(containerBottom - trayTop));
+}
+
 /** Bounding-box center of the current cart, or null when it's empty. Lets the
  *  explorer open centered on a word just placed via the homepage calculator. */
 function selectionCentroid(): CellPoint | null {
@@ -267,7 +280,7 @@ export default function MonumentExplorer() {
         const b = visibleCellBounds(vp);
         const margin = 5;
         if (cx < b.minX + margin || cx > b.maxX - margin || cy < b.minY + margin || cy > b.maxY - margin) {
-          centerViewportOn(vp, cx, cy);
+          centerViewportOn(vp, cx, cy, trayInsetPx(containerRef.current));
           rendererRef.current?.markDirty();
           setTier(lodTierForScale(vp.scale));
           fetchVisibleTiles();
@@ -413,7 +426,7 @@ export default function MonumentExplorer() {
     const { x, y } = focusRef.current;
     const b = visibleCellBounds(vp);
     if (x <= b.minX + 1 || x >= b.maxX - 1 || y <= b.minY + 1 || y >= b.maxY - 1) {
-      centerViewportOn(vp, x, y);
+      centerViewportOn(vp, x, y, trayInsetPx(containerRef.current));
     }
   }, []);
 
@@ -644,7 +657,7 @@ export default function MonumentExplorer() {
       // container that measured 0×0 at mount leaves the cell pinned to the
       // top-left corner.
       if (!hasInteractedRef.current) {
-        centerViewportOn(vp, initialFocus.x, initialFocus.y);
+        centerViewportOn(vp, initialFocus.x, initialFocus.y, trayInsetPx(containerRef.current));
         renderer.markDirty();
       }
       fetchVisibleTiles();
@@ -702,7 +715,7 @@ export default function MonumentExplorer() {
     const b = visibleCellBounds(vp);
     const margin = 2;
     if (nextX < b.minX + margin || nextX > b.maxX - margin || fromY < b.minY + margin || fromY > b.maxY - margin) {
-      centerViewportOn(vp, nextX, fromY);
+      centerViewportOn(vp, nextX, fromY, trayInsetPx(containerRef.current));
       rendererRef.current?.markDirty();
       fetchVisibleTiles();
     }

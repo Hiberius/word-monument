@@ -112,6 +112,9 @@ export default function SelectionTray({ onReposition }: { onReposition?: () => v
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-3 sm:px-6 sm:pb-6">
       <div
+        // The explorer measures this to keep the buyer's words out from under
+        // the tray when it recenters (see trayInsetPx in MonumentExplorer).
+        data-selection-tray=""
         className="pointer-events-auto w-full max-w-3xl border-t-2 border-ink bg-parchment-card"
         style={{ clipPath: tornEdgeClipPath() }}
       >
