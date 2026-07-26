@@ -16,16 +16,21 @@ export default function HeroCopy() {
         Entry No. 000,000,001. Open now
       </p>
 
-      <h1
-        id="hero-heading"
-        className="mt-5 font-headline text-[clamp(2.5rem,4.5vw+1rem,5rem)] leading-[1.0] text-ink"
-      >
-        {variant.headline}
-      </h1>
+      {/* Height reserved for the tallest variant at each breakpoint: the copy
+          swaps in after hydration, and without a floor the LCP headline
+          reflows and shoves the CTA and everything under it down the page. */}
+      <div className="mt-5 min-h-[250px] sm:min-h-[166px] lg:min-h-[285px] xl:min-h-[282px]">
+        <h1
+          id="hero-heading"
+          className="font-headline text-[clamp(2.5rem,4.5vw+1rem,5rem)] leading-[1.0] text-ink"
+        >
+          {variant.headline}
+        </h1>
 
-      <p className="mt-6 max-w-xl font-body text-lg leading-relaxed text-ink-60 sm:text-xl">
-        {variant.subcopy}
-      </p>
+        <p className="mt-6 max-w-xl font-body text-lg leading-relaxed text-ink-60 sm:text-xl">
+          {variant.subcopy}
+        </p>
+      </div>
 
       <div className="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
         <Link

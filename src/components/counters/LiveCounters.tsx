@@ -79,13 +79,13 @@ function StatRow({
       <p className="font-mono-grid text-3xl text-parchment sm:text-4xl">{children}</p>
       <p
         className={`font-mono-grid text-xs uppercase tracking-[0.2em] ${
-          emphasized ? 'text-parchment/85' : 'text-parchment/60'
+          emphasized ? 'text-parchment' : 'text-parchment/60'
         }`}
       >
         {label}
       </p>
       {footnote ? (
-        <p className={`font-body text-[11px] leading-snug ${emphasized ? 'text-parchment/75' : 'text-parchment/50'}`}>
+        <p className={`font-body text-[11px] leading-snug ${emphasized ? 'text-parchment/90' : 'text-parchment/50'}`}>
           {footnote}
         </p>
       ) : null}

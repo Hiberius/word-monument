@@ -54,7 +54,13 @@ export async function getMonumentStats(): Promise<MonumentStats> {
       supabase.from('cells_public').select('id', { count: 'exact', head: true }).eq('status', 'reserved'),
     ])
 
-    if (error || !data) return EMPTY_STATS
+    // EMPTY_STATS is indistinguishable from a genuinely empty monument on the
+    // homepage, and the page is cached for 60s, so a degraded read has to be
+    // visible in the logs or nobody finds out it happened.
+    if (error || !data) {
+      console.error('[monumentStats] monument_stats read failed', error ?? 'no monument_stats row')
+      return EMPTY_STATS
+    }
 
     const cellsSold = data.sold_count ?? 0
     const cellsReserved = reservedCount ?? 0
@@ -67,7 +73,8 @@ export async function getMonumentStats(): Promise<MonumentStats> {
       cellsRemaining: Math.max(0, TOTAL_CELLS - cellsSold - cellsReserved),
       totalRevenueCents,
     }
-  } catch {
+  } catch (error) {
+    console.error('[monumentStats] getMonumentStats failed', error)
     return EMPTY_STATS
   }
 }

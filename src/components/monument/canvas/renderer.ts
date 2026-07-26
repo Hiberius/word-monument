@@ -284,13 +284,17 @@ function drawTier2(ctx: CanvasRenderingContext2D, vp: ViewportState, store: Tile
     for (let x = minX; x <= maxX; x++) {
       const topLeft = cellToScreen(vp, x, y);
 
+      const cell = store.getCell(x, y);
+      const claimedOnServer = cell !== undefined && cell.status !== "available";
+
       let bg: string;
       let character: string | null;
-      if (selectionStore.has(x, y)) {
+      // Server truth outranks the cart: a cell claimed by someone else while it
+      // sat in the cart must read as taken, not as the buyer's own glyph.
+      if (!claimedOnServer && selectionStore.has(x, y)) {
         bg = getCellColorById(selectionStore.getCellColorId(x, y)).bg;
         character = selectionStore.getCharacter(x, y) ?? null;
       } else {
-        const cell = store.getCell(x, y);
         if (!cell || cell.status === "available") continue; // background is already parchment
         bg = cell.status === "sold" ? cell.backgroundColor ?? SOLD_FILL : INK_MUTED;
         character = cell.status === "sold" ? cell.character : null;
@@ -321,8 +325,11 @@ function drawTier3(ctx: CanvasRenderingContext2D, vp: ViewportState, store: Tile
   for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
       const topLeft = cellToScreen(vp, x, y);
-      const selected = selectionStore.has(x, y);
       const cell = store.getCell(x, y);
+      // Server truth outranks the cart: a cell claimed by someone else while it
+      // sat in the cart must read as taken, not as the buyer's own glyph.
+      const claimedOnServer = cell !== undefined && cell.status !== "available";
+      const selected = !claimedOnServer && selectionStore.has(x, y);
       const status = selected ? "selected" : (cell?.status ?? "available");
 
       if (status === "selected") {

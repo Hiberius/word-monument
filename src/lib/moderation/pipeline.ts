@@ -1,5 +1,5 @@
 import { validateCharacter } from '@/lib/moderation/charset';
-import { assembleMessage, checkBlocklist } from '@/lib/moderation/blocklist';
+import { assembleMessage, assembleRuns, checkBlocklist } from '@/lib/moderation/blocklist';
 import { moderateText } from '@/lib/moderation/openai';
 import { getReservationCells } from '@/lib/db/cells';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
@@ -18,15 +18,19 @@ interface PreReservationCell {
 /**
  * Synchronous, cheap gate run at reservation time (before payment). Rejects
  * invalid characters outright, then runs the deterministic blocklist
- * against the assembled message. This does NOT call the OpenAI moderation
+ * against the assembled text. This does NOT call the OpenAI moderation
  * API - that only happens after purchase, in postPurchaseModerationCheck.
  *
- * Takes full {x,y,character} cells, not a bare characters[], and joins them
- * via assembleMessage (grid reading order: y then x) - the SAME order the
- * public grid actually renders in and postPurchaseModerationCheck evaluates.
- * A client-submission-order join here would let an attacker reorder the
- * request array so the blocklist check sees a harmless permutation while
- * the live grid still spells out the blocked term at its real coordinates.
+ * Takes full {x,y,character} cells, not a bare characters[], and reads them in
+ * grid reading order (y then x) - the SAME order the public grid actually
+ * renders in and postPurchaseModerationCheck evaluates. Joining them in client
+ * submission order would let an attacker reorder the request array so the
+ * blocklist check sees a harmless permutation while the live grid still spells
+ * out the blocked term at its real coordinates.
+ *
+ * Checks each contiguous run on its own rather than the whole selection joined
+ * end to end: a selection spanning several rows or with gaps in it is not one
+ * word, and treating it as one invents terms the buyer never wrote.
  */
 export function preReservationCheck(cells: PreReservationCell[]): PreReservationCheckResult {
   for (const cell of cells) {
@@ -35,17 +39,17 @@ export function preReservationCheck(cells: PreReservationCell[]): PreReservation
     }
   }
 
-  const combined = assembleMessage(cells);
-  const blocklistResult = checkBlocklist(combined);
-  if (blocklistResult.blocked) {
-    return { ok: false, reason: 'blocked_content' };
+  for (const run of assembleRuns(cells)) {
+    if (checkBlocklist(run).blocked) {
+      return { ok: false, reason: 'blocked_content' };
+    }
   }
 
   return { ok: true };
 }
 
 // How far left/right of the requested cells to pull already-sold neighbours
-// when reconstructing row text - comfortably longer than any single blocked
+// when reconstructing run text - comfortably longer than any single blocked
 // term, so a slur split across the purchase boundary is still assembled whole.
 const CROSS_RESERVATION_MARGIN = 24;
 
@@ -53,13 +57,16 @@ const CROSS_RESERVATION_MARGIN = 24;
  * Defends against splitting a blocked term across several separate $1
  * purchases: a per-reservation check alone never sees the neighbours. Here we
  * pull the already-sold cells horizontally adjacent to the requested cells (same
- * row, within a margin), merge them with the request, reassemble each row's
- * contiguous text in grid reading order, and blocklist-check it - so whoever
+ * row, within a margin), merge them with the request, reassemble each
+ * contiguous run in grid reading order, and blocklist-check it - so whoever
  * completes the word last is rejected. Async + DB-backed, so it runs at reserve
  * time alongside the reservation itself, not in the sync pre-check.
  *
- * Fail-open: a moderation-query error must never block a legitimate buyer. The
- * post-purchase OpenAI pass remains the backstop.
+ * Fails CLOSED with 'moderation_unavailable' when the query breaks: nothing
+ * else in the system ever looks at a term spread across separate purchases (the
+ * post-purchase OpenAI pass only ever sees one reservation's own text), so an
+ * error here is the whole check, not one of two. The reserve route turns that
+ * reason into a retryable 503 rather than a content rejection.
  */
 export async function crossReservationBlocklistCheck(
   cells: PreReservationCell[]
@@ -85,20 +92,13 @@ export async function crossReservationBlocklistCheck(
 
     if (error) {
       console.error('[moderation/pipeline] crossReservationBlocklistCheck query failed', error);
-      return { ok: true };
+      return { ok: false, reason: 'moderation_unavailable' };
     }
 
     const sold = (data ?? []) as { x: number; y: number; character: string }[];
 
-    // Check each row independently - assembleMessage concatenates across rows,
-    // and rows aren't visually contiguous, so a cross-row join would be a false
-    // positive.
-    for (const y of rows) {
-      const rowText = assembleMessage([
-        ...cells.filter((cell) => cell.y === y),
-        ...sold.filter((cell) => cell.y === y),
-      ]);
-      if (checkBlocklist(rowText).blocked) {
+    for (const run of assembleRuns([...cells, ...sold])) {
+      if (checkBlocklist(run).blocked) {
         return { ok: false, reason: 'blocked_content' };
       }
     }
@@ -106,7 +106,7 @@ export async function crossReservationBlocklistCheck(
     return { ok: true };
   } catch (error) {
     console.error('[moderation/pipeline] crossReservationBlocklistCheck failed', error);
-    return { ok: true };
+    return { ok: false, reason: 'moderation_unavailable' };
   }
 }
 

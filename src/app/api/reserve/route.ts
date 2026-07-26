@@ -9,7 +9,8 @@ import { storeReservationVariant } from '@/lib/db/heroVariants'
 import { isKnownVariantId } from '@/lib/hero/variants'
 import { isKnownColorId, bgHexForColorId } from '@/lib/monument/colors'
 import { isSupabaseConfigured } from '@/lib/supabase/public'
-import { GRID_SIZE, MAX_CELLS_PER_TX } from '@/lib/config'
+import { getSupabaseAdmin, isSupabaseAdminConfigured } from '@/lib/supabase/admin'
+import { GRID_SIZE, MAX_CELLS_PER_TX, RESERVATION_TTL_SECONDS } from '@/lib/config'
 
 const RATE_LIMIT_MAX_REQUESTS = 10
 const RATE_LIMIT_WINDOW_SECONDS = 60
@@ -27,6 +28,30 @@ async function getRateLimitKv(): Promise<KVNamespace | undefined> {
     console.warn('[api/reserve] Cloudflare context unavailable, skipping KV-backed rate limiting', error)
     return undefined
   }
+}
+
+/**
+ * Hands this connection its own still-live holds back. Called ONLY once the
+ * per-IP cap has already rejected a request, so it can never shorten a hold
+ * that was not already in the caller's way. Scoped to a single ip hash inside
+ * the RPC, which also refuses holds already extended for a live Stripe session.
+ */
+async function releaseOwnHolds(ipHash: string): Promise<number> {
+  const supabase = getSupabaseAdmin()
+
+  const { data, error } = await supabase.rpc('release_ip_reservations', {
+    p_ip_hash: ipHash,
+    // Explicit rather than relying on the RPC's own default, so app config and
+    // DB behavior can never silently drift apart.
+    p_ttl_seconds: RESERVATION_TTL_SECONDS,
+  })
+
+  if (error) {
+    throw new Error(`releaseOwnHolds: release_ip_reservations RPC failed: ${error.message}`)
+  }
+
+  const released = Array.isArray(data) ? data[0] : data
+  return typeof released === 'number' ? released : Number(released ?? 0)
 }
 
 interface ReserveRequestCell {
@@ -69,8 +94,21 @@ export async function POST(request: Request) {
     // (0) Live-preview short-circuit: with no Supabase project connected the
     // grid runs on demo content and can't take real reservations. Say so
     // plainly instead of failing with a generic 500 once reserveCells hits the
-    // (absent) database.
-    if (!isSupabaseConfigured()) {
+    // (absent) database. Gated on the SERVICE-ROLE credentials this path
+    // actually needs, not on the public ones the read-only grid runs on.
+    if (!isSupabaseAdminConfigured()) {
+      // Public vars present but no service-role key is a broken deployment, not
+      // a preview: a real buyer on a live site must not be told otherwise.
+      if (isSupabaseConfigured()) {
+        console.error(
+          'POST /api/reserve: SUPABASE_SERVICE_ROLE_KEY is missing while the public Supabase vars are set - reservations are disabled'
+        )
+        return NextResponse.json(
+          { error: 'Claiming words is temporarily unavailable. Please try again shortly.' },
+          { status: 503 }
+        )
+      }
+
       return NextResponse.json(
         {
           error: 'preview',
@@ -146,6 +184,16 @@ export async function POST(request: Request) {
     // check the requested cells joined with already-sold horizontal neighbours.
     const crossResult = await crossReservationBlocklistCheck(cells)
     if (!crossResult.ok) {
+      // The check fails closed, so its own outage lands here too. That is our
+      // fault and it passes: answer it as a transient, retryable failure rather
+      // than accusing the buyer's words of anything.
+      if (crossResult.reason === 'moderation_unavailable') {
+        return NextResponse.json(
+          { error: 'Content checks are briefly unavailable. Please try again in a moment.' },
+          { status: 503 }
+        )
+      }
+
       return NextResponse.json(
         { error: crossResult.reason ?? 'One or more characters were rejected by content moderation.' },
         { status: 422 }
@@ -166,18 +214,49 @@ export async function POST(request: Request) {
       return typeof raw === 'string' && isKnownColorId(raw) ? bgHexForColorId(raw) : null
     })
 
+    const reserveParams = {
+      cellIds,
+      characters,
+      reservationId,
+      ipHash,
+      backgroundColors,
+    }
+
     let result
     try {
-      result = await reserveCells({
-        cellIds,
-        characters,
-        reservationId,
-        ipHash,
-        backgroundColors,
-      })
+      result = await reserveCells(reserveParams)
     } catch (err) {
       // Deterministic policy rejection, not a server fault: answer it as one.
-      if (err instanceof ReserveCapExceededError) {
+      if (!(err instanceof ReserveCapExceededError)) {
+        throw err
+      }
+
+      // The cap counts this connection's OWN live holds, so a visitor who
+      // changes their mind and reselects is locked out by their abandoned
+      // selection for the rest of its TTL with nothing they can do about it.
+      // Give that selection back once, then retry; a second cap rejection is a
+      // real one and stands.
+      let released = 0
+      try {
+        released = await releaseOwnHolds(ipHash)
+      } catch (releaseErr) {
+        // A failed self-heal leaves the caller exactly where the cap already
+        // put them, so it must not escalate into a 500.
+        console.error('POST /api/reserve: releasing own holds failed:', releaseErr)
+      }
+
+      let retryResult: Awaited<ReturnType<typeof reserveCells>> | undefined
+      if (released > 0) {
+        try {
+          retryResult = await reserveCells(reserveParams)
+        } catch (retryErr) {
+          if (!(retryErr instanceof ReserveCapExceededError)) {
+            throw retryErr
+          }
+        }
+      }
+
+      if (!retryResult) {
         return NextResponse.json(
           {
             error:
@@ -186,7 +265,8 @@ export async function POST(request: Request) {
           { status: 429 }
         )
       }
-      throw err
+
+      result = retryResult
     }
 
     // (5) Respond.

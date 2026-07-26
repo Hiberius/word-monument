@@ -25,10 +25,39 @@ export function assembleMessage(cells: CellCharacter[]): string {
     .join('');
 }
 
+/**
+ * Splits cells into the contiguous horizontal runs a visitor actually reads:
+ * a new run begins at every row change and at every gap in x. Blocklist checks
+ * must run per run, because joining a whole selection into one string fuses
+ * words that are rows apart or separated by cells nobody bought into terms
+ * nobody ever wrote - and a false positive here 422s a paying buyer.
+ */
+export function assembleRuns(cells: CellCharacter[]): string[] {
+  const runs: string[] = [];
+  let current = '';
+  let previous: CellCharacter | undefined;
+
+  for (const cell of [...cells].sort((a, b) => a.y - b.y || a.x - b.x)) {
+    if (previous && (cell.y !== previous.y || cell.x !== previous.x + 1)) {
+      runs.push(current);
+      current = '';
+    }
+    current += cell.character;
+    previous = cell;
+  }
+
+  if (current.length > 0) {
+    runs.push(current);
+  }
+
+  return runs;
+}
+
 // Deliberately small starter list of obvious hate/slur/spam terms, meant to
 // be extended later (ideally swapped for a maintained external word list
 // before this product scales). Matching is exact-substring on normalized,
-// lowercased, whitespace-collapsed text.
+// lowercased, whitespace-collapsed text, and on a separator-stripped form of
+// it so the multi-word entries below are reachable at all.
 const BLOCKED_TERMS: string[] = [
   // Hate speech / slurs
   'nigger',
@@ -54,6 +83,13 @@ function normalizeForCheck(message: string): string {
   return message.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+// Grid text is assembled straight from the cells, with no spaces between
+// words, so a multi-word term can only ever match once the separators are
+// stripped from both the message and the term.
+function stripSeparators(value: string): string {
+  return value.replace(/[\s\-_.,*]/g, '');
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -76,8 +112,10 @@ export function checkBlocklist(message: string): { blocked: boolean; matchedTerm
     return { blocked: false };
   }
 
+  const compact = stripSeparators(normalized);
+
   for (const term of BLOCKED_TERMS) {
-    if (normalized.includes(term)) {
+    if (normalized.includes(term) || compact.includes(stripSeparators(term))) {
       return { blocked: true, matchedTerm: term };
     }
   }

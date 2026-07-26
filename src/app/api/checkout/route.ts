@@ -6,7 +6,7 @@ import { readBoundedJson } from '@/lib/security/request-body'
 import { verifyTurnstileToken } from '@/lib/security/turnstile'
 import { getReservationCells, extendReservation } from '@/lib/db/cells'
 import { createCheckoutSessionForReservation } from '@/lib/stripe/checkout'
-import { RESERVATION_TTL_SECONDS } from '@/lib/config'
+import { RESERVATION_TTL_SECONDS, CHECKOUT_HOLD_SLACK_SECONDS } from '@/lib/config'
 
 const RATE_LIMIT_MAX_REQUESTS = 10
 const RATE_LIMIT_WINDOW_SECONDS = 60
@@ -112,9 +112,12 @@ export async function POST(request: Request) {
 
     // (3b) Re-anchor the hold to now + TTL so it covers the whole life of the
     // Stripe session we are about to create (whose expires_at is measured from
-    // session creation, not from when the cells were first reserved). If the
-    // hold lapsed in the meantime, treat the reservation as expired.
-    const extendedCount = await extendReservation(reservationId, RESERVATION_TTL_SECONDS)
+    // session creation, not from when the cells were first reserved). The extra
+    // slack makes the hold OUTLIVE the session rather than end with it: a
+    // payment completing in the session's final moments would otherwise land
+    // after the hold lapsed and be refunded instead of fulfilled. If the hold
+    // lapsed in the meantime, treat the reservation as expired.
+    const extendedCount = await extendReservation(reservationId, RESERVATION_TTL_SECONDS + CHECKOUT_HOLD_SLACK_SECONDS)
     if (extendedCount !== reservation.cells.length) {
       return NextResponse.json({ error: 'This reservation has expired or is no longer valid.' }, { status: 410 })
     }

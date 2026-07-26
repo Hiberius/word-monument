@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 
 export default function MonumentPage() {
   return (
-    <div className="h-[calc(100vh-4.5rem)] w-full">
+    <div className="h-[calc(100dvh-4.5rem)] w-full">
       <MonumentExplorerLoader />
     </div>
   )

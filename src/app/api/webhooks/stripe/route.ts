@@ -8,7 +8,7 @@ import { completePurchase, releaseReservation } from '@/lib/db/cells'
 import { getSupabaseAdmin } from '@/lib/supabase/admin'
 import { postPurchaseModerationCheck } from '@/lib/moderation/pipeline'
 import { recordHeroConversion } from '@/lib/db/heroVariants'
-import { CELL_PRICE_CENTS } from '@/lib/config'
+import { CELL_PRICE_CENTS, CHECKOUT_HOLD_SLACK_SECONDS } from '@/lib/config'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -170,8 +170,19 @@ async function handleCheckoutSessionExpired(event: any): Promise<void> {
   // bound, the older session's expiry event frees cells the newer, still
   // payable session is about to be charged for, leaving the buyer charged,
   // refunded and empty-handed.
+  //
+  // The bound is the session's expiry PLUS the slack the checkout route adds to
+  // the hold: /api/checkout deliberately extends reserved_until past expires_at
+  // so a payment landing in the last seconds is still fulfillable. Comparing
+  // against the bare expires_at would therefore never match this session's own
+  // hold, turning every expiry event into a no-op and leaving abandoned carts
+  // to the 5-minute sweep. A NEWER session pushes reserved_until a further full
+  // TTL out, well beyond this window, so the stale-session guard still holds.
   const expiresAt: number | null = typeof session.expires_at === 'number' ? session.expires_at : null
-  await releaseReservation(reservationId, expiresAt ? new Date(expiresAt * 1000).toISOString() : null)
+  const releaseBound = expiresAt
+    ? new Date((expiresAt + CHECKOUT_HOLD_SLACK_SECONDS) * 1000).toISOString()
+    : null
+  await releaseReservation(reservationId, releaseBound)
 }
 
 export async function POST(request: Request) {

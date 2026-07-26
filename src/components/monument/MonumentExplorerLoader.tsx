@@ -8,7 +8,7 @@ import dynamic from 'next/dynamic'
 const MonumentExplorer = dynamic(() => import('@/components/monument/MonumentExplorer'), {
   ssr: false,
   loading: () => (
-    <div className="flex h-[calc(100vh-4.5rem)] items-center justify-center bg-parchment">
+    <div className="flex h-[calc(100dvh-4.5rem)] items-center justify-center bg-parchment">
       <p className="font-mono-grid text-sm text-ink-60">Unrolling the ledger&hellip;</p>
     </div>
   ),

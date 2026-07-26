@@ -5,7 +5,7 @@ import { GRID_SIZE, MAX_CELLS_PER_TX, TILE_SIZE } from "@/lib/config";
 import { ALLOWED_PUNCTUATION, CURATED_EMOJI, validateCharacter } from "@/lib/moderation/charset";
 import { CELL_COLORS } from "@/lib/monument/colors";
 import { selectionStore } from "@/lib/monument/selection-store";
-import { tilesInViewport } from "@/lib/monument/tile-math";
+import { tileKey, tilesInViewport } from "@/lib/monument/tile-math";
 import { attachGestures } from "./canvas/gestures";
 import { createRenderer, type Renderer } from "./canvas/renderer";
 import { TileDataStore } from "./canvas/tiles";
@@ -141,6 +141,40 @@ export default function MonumentExplorer() {
   const focusRef = useRef({ x: Math.floor(GRID_SIZE / 2), y: Math.floor(GRID_SIZE / 2) });
   const [announcement, setAnnouncement] = useState("");
 
+  /**
+   * Drops cart cells the server has since claimed. A cell in the cart always
+   * draws as "yours", so a cell sold or reserved by someone else while it sat
+   * there would keep showing the buyer's own glyph until checkout came back
+   * 409. Runs whenever fresh tile data lands, which is the only moment we can
+   * learn about it.
+   */
+  const reconcileCartWithTiles = useCallback(() => {
+    const store = storeRef.current;
+    if (!store) return;
+    const snapshot = selectionStore.getSnapshot();
+    if (snapshot.size === 0) return;
+    let dropped = 0;
+    for (const key of Array.from(snapshot.keys())) {
+      const comma = key.indexOf(",");
+      const x = Number(key.slice(0, comma));
+      const y = Number(key.slice(comma + 1));
+      const serverCell = store.getCell(x, y);
+      if (serverCell && serverCell.status !== "available") {
+        selectionStore.remove(x, y);
+        dropped += 1;
+      }
+    }
+    if (dropped === 0) return;
+    const notice =
+      dropped === 1
+        ? "One of your cells was just claimed by someone else and left your selection."
+        : `${dropped} of your cells were just claimed by someone else and left your selection.`;
+    setAnnouncement(notice);
+    // Reposition mode replaces the tray with the move chip, so there the chip
+    // is the only place a visible notice can land.
+    if (moveModeRef.current) setMoveNotice(notice);
+  }, []);
+
   const fetchVisibleTiles = useCallback(() => {
     const vp = vpRef.current;
     const store = storeRef.current;
@@ -150,7 +184,27 @@ export default function MonumentExplorer() {
     store
       .fetchTiles(tiles)
       .catch((err) => console.warn("[MonumentExplorer] fetchTiles rejected", err))
-      .finally(() => rendererRef.current?.markDirty());
+      .finally(() => {
+        reconcileCartWithTiles();
+        rendererRef.current?.markDirty();
+      });
+  }, [reconcileCartWithTiles]);
+
+  /**
+   * Whether a cache miss at (x, y) can be trusted to mean "free". Inside the
+   * region we keep fetching it can: a miss there is a genuinely unclaimed cell.
+   * Outside it, only a tile whose summary reports nothing sold is provably
+   * empty; anywhere else the cell is simply unknown, and treating unknown as
+   * free produces repositions that are doomed at checkout.
+   */
+  const isUnfetchedCellFree = useCallback((x: number, y: number): boolean => {
+    const vp = vpRef.current;
+    const store = storeRef.current;
+    if (!vp || !store) return false;
+    const b = visibleCellBounds(vp, TILE_FETCH_MARGIN_CELLS);
+    if (x >= b.minX && x <= b.maxX && y >= b.minY && y <= b.maxY) return true;
+    const summary = store.tileSummaries.get(tileKey(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE)));
+    return summary !== undefined && summary.soldCount === 0;
   }, []);
 
   /**
@@ -184,6 +238,10 @@ export default function MonumentExplorer() {
           setMoveNotice("That spot overlaps taken cells. Try another.");
           return false;
         }
+        if (!serverCell && !isUnfetchedCellFree(nx, ny)) {
+          setMoveNotice("We can't see that spot yet. Pan over there first, then move your words.");
+          return false;
+        }
       }
     }
 
@@ -210,7 +268,7 @@ export default function MonumentExplorer() {
       }
     }
     return moved;
-  }, [fetchVisibleTiles]);
+  }, [fetchVisibleTiles, isUnfetchedCellFree]);
 
   /** Reposition-mode tap: drop the cart centered on the tapped cell. */
   const handleMoveTap = useCallback(
@@ -239,6 +297,11 @@ export default function MonumentExplorer() {
     if (!vp) return;
     if (lodTierForScale(vp.scale) < 3) return; // selection only activates at Tier 3+
     if (cellX < 0 || cellY < 0 || cellX >= GRID_SIZE || cellY >= GRID_SIZE) return;
+
+    // A tap is a focus change too: without this the next arrow key snaps the
+    // view back to wherever the keyboard focus was last left.
+    focusRef.current = { x: cellX, y: cellY };
+    rendererRef.current?.setFocusCell(focusRef.current);
 
     if (moveModeRef.current) {
       handleMoveTap(cellX, cellY);
@@ -627,6 +690,15 @@ export default function MonumentExplorer() {
       closeEditor();
       return;
     }
+    // Follow the caret before measuring: a long word otherwise walks the editor
+    // (and the cell it edits) straight off the right edge of the viewport.
+    const b = visibleCellBounds(vp);
+    const margin = 2;
+    if (nextX < b.minX + margin || nextX > b.maxX - margin || fromY < b.minY + margin || fromY > b.maxY - margin) {
+      centerViewportOn(vp, nextX, fromY);
+      rendererRef.current?.markDirty();
+      fetchVisibleTiles();
+    }
     const screen = cellToScreen(vp, nextX + 0.5, fromY + 0.5);
     const nextChar = selectionStore.getCharacter(nextX, fromY) ?? "";
     setEditor({
@@ -652,16 +724,19 @@ export default function MonumentExplorer() {
     moveModeRef.current = true;
     setMoveMode(true);
     setMoveNotice(null);
-    setAnnouncement("Reposition mode. Tap a cell to move your words there. Arrow keys nudge; Enter or Escape finishes.");
+    // Focus first: focusing the canvas announces the focused cell, and that
+    // announcement would replace this one in the same batch, leaving screen
+    // readers with no word about reposition mode at all.
     canvasRef.current?.focus();
+    setAnnouncement("Reposition mode. Tap a cell to move your words there. Arrow keys nudge; Enter or Escape finishes.");
   }
 
   function exitMoveMode() {
     moveModeRef.current = false;
     setMoveMode(false);
     setMoveNotice(null);
-    setAnnouncement("Reposition finished.");
     canvasRef.current?.focus();
+    setAnnouncement("Reposition finished.");
   }
 
   function removeSelected() {

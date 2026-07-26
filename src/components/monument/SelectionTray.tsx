@@ -116,13 +116,20 @@ export default function SelectionTray({ onReposition }: { onReposition?: () => v
         style={{ clipPath: tornEdgeClipPath() }}
       >
         {error && (
-          <div className="border-b border-stamp-red/30 bg-stamp-red/10 px-4 py-2 font-body text-sm text-stamp-red sm:px-6">
+          <div
+            role="alert"
+            className="border-b border-stamp-red/30 bg-stamp-red/10 px-4 py-2 font-body text-sm text-stamp-red sm:px-6"
+          >
             {error}
           </div>
         )}
 
         {notice && (
-          <div className="border-b border-ink/15 bg-parchment-aged px-4 py-2 font-body text-sm text-ink sm:px-6">
+          <div
+            role="status"
+            aria-live="polite"
+            className="border-b border-ink/15 bg-parchment-aged px-4 py-2 font-body text-sm text-ink sm:px-6"
+          >
             {notice}
           </div>
         )}
@@ -201,7 +208,7 @@ export default function SelectionTray({ onReposition }: { onReposition?: () => v
                 type="button"
                 onClick={onReposition}
                 title="Move your words somewhere else on the grid"
-                className="shrink-0 border-2 border-ink bg-parchment px-3 py-2.5 font-body text-sm font-medium text-ink transition-all hover:-translate-y-0.5 focus-visible:-translate-y-0.5 focus-visible:outline-none"
+                className="shrink-0 border-2 border-ink bg-parchment px-3 py-2.5 font-body text-sm font-medium text-ink transition-all hover:-translate-y-0.5 focus-visible:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-parchment-card"
               >
                 <span className="sm:hidden">Move</span>
                 <span className="hidden sm:inline">Reposition</span>
@@ -211,7 +218,7 @@ export default function SelectionTray({ onReposition }: { onReposition?: () => v
               type="button"
               onClick={handleCheckout}
               disabled={isSubmitting}
-              className="flex-1 border-2 border-stamp-red bg-stamp-red px-4 py-2.5 text-center font-body text-sm font-medium text-parchment transition-all hover:-translate-y-0.5 focus-visible:-translate-y-0.5 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 sm:flex-none sm:px-5"
+              className="flex-1 border-2 border-stamp-red bg-stamp-red px-4 py-2.5 text-center font-body text-sm font-medium text-parchment transition-all hover:-translate-y-0.5 focus-visible:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-parchment-card disabled:pointer-events-none disabled:opacity-50 sm:flex-none sm:px-5"
             >
               {isSubmitting ? "Reserving…" : "Review & Checkout"}
             </button>

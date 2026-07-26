@@ -9,10 +9,13 @@ export async function createCheckoutSessionForReservation(params: {
 }): Promise<{ url: string; sessionId: string }> {
   const amountCents = params.cellCount * CELL_PRICE_CENTS
 
-  // Same TTL as the DB hold, anchored at session creation. /api/checkout
-  // re-anchors reserved_until to the same clock (extend_reservation) right
-  // before calling this, so the session and the hold expire together instead
-  // of the session outliving a hold that started earlier.
+  // Anchored at session creation, on the same clock /api/checkout uses to
+  // re-anchor reserved_until (extend_reservation) right before calling this.
+  // The hold is deliberately given CHECKOUT_HOLD_SLACK_SECONDS more than this
+  // window, so a payment completing in the session's last moments still finds
+  // a live reservation. Do not stretch expires_at to match the hold: Stripe
+  // rejects anything under a ~30 minute window, and this TTL already sits
+  // close to that floor.
   const expiresAtUnixSeconds = Math.floor(Date.now() / 1000) + RESERVATION_TTL_SECONDS
 
   const cellWord = params.cellCount === 1 ? 'cell' : 'cells'
