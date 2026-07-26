@@ -1,0 +1,61 @@
+# Word Monument - Cloudflare Workers config (OpenNext-on-Cloudflare).
+#
+# One-time setup required before the first deploy:
+#   1. Create the two KV namespaces and replace the placeholder "id" values below:
+#        npx wrangler kv namespace create NEXT_INC_CACHE_KV
+#        npx wrangler kv namespace create RATE_LIMIT
+#   2. Create the R2 bucket referenced below:
+#        npx wrangler r2 bucket create word-monument-cache
+#   3. Set every secret listed in .env.example via `wrangler secret put <NAME>`
+#      (SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+#      TURNSTILE_SECRET_KEY, OPENAI_API_KEY, ADMIN_PASSWORD_HASH,
+#      ADMIN_SESSION_SECRET, CRON_SECRET, etc.) - never commit real values here.
+#
+# `main` points at ./custom-worker.ts rather than .open-next/worker.js directly
+# because OpenNext only generates a `fetch` handler by default, and the cron
+# sweep below needs a `scheduled` handler exported alongside it.
+
+name = "word-monument"
+main = "./custom-worker.ts"
+compatibility_date = "2026-07-12"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+
+# Static assets emitted by the OpenNext Cloudflare adapter.
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
+
+# Self-reference binding required by OpenNext so ISR tag revalidation can
+# call back into this same Worker service.
+[[services]]
+binding = "WORKER_SELF_REFERENCE"
+service = "word-monument"
+
+# R2 bucket backing the Next.js incremental cache (ISR/data cache).
+[[r2_buckets]]
+binding = "NEXT_INC_CACHE_R2_BUCKET"
+bucket_name = "word-monument-cache"
+
+# Kept as two separate KV namespaces on purpose: a KV outage or quota issue
+# affecting the Next.js incremental cache should never be confused in logs
+# or dashboards with an outage affecting reservation rate limiting.
+[[kv_namespaces]]
+binding = "NEXT_INC_CACHE_KV"
+id = "REPLACE_WITH_NEXT_INC_CACHE_KV_NAMESPACE_ID"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "REPLACE_WITH_RATE_LIMIT_KV_NAMESPACE_ID"
+
+# Cron sweep is a safety net behind the event-driven checkout.session.expired
+# release path, not the primary reservation-release mechanism. Every 5
+# minutes comfortably beats the 35-minute reservation TTL.
+[triggers]
+# Every 5 minutes: expired-reservation sweep. At :11/:26/:41/:56: moderation
+# retry sweep (pattern must match MODERATION_SWEEP_CRON in custom-worker.ts).
+crons = ["*/5 * * * *", "11,26,41,56 * * * *"]
+
+[vars]
+NEXT_PUBLIC_SITE_URL = "https://wordmonument.com"
+NEXT_PUBLIC_SUPABASE_URL = "https://placeholder-project.supabase.co"
+LOG_LEVEL = "info"

@@ -1,0 +1,83 @@
+/* ==========================================================================
+   Civic Ledger - design tokens (source of truth)
+
+   Public-registry, audited-record aesthetic: a physical ledger book or a
+   cornerstone plaque, never a SaaS dashboard. Depth comes from tonal
+   parchment steps and --rule hairlines, not shadows or gradients.
+
+   --stamp-red is the ONE accent in this entire product. It is used only
+   for primary CTA fills, the available-cell dashed-border accent in the
+   grid, and error states. Never as a decorative wash, never scattered.
+   Everything else reaches for ink, parchment, or a rule line instead.
+   ========================================================================== */
+
+:root {
+  /* ---- Surface -----------------------------------------------------------
+     Parchment, never pure white. The two tonal steps below stand in for
+     elevation: a card or a recessed band shifts lightness, it never gains
+     a shadow. Derived with relative-color oklch() off the same base so all
+     three stay perfectly hue-matched. */
+  --parchment: #f6f1e7;
+  --parchment-aged: oklch(from var(--parchment) calc(l - 0.04) c h);
+  --parchment-card: oklch(from var(--parchment) calc(l - 0.02) c h);
+
+  /* ---- Text ----------------------------------------------------------------
+     Near-black ink. --ink-60 is a genuine lighter oklch step (not ink at
+     60% opacity) so it reads cleanly when it sits on the aged/card surfaces
+     above, not just the base parchment. Raising L by ~0.25 keeps it at
+     roughly 6:1 contrast against --parchment - clearly secondary, still
+     comfortably past WCAG AA for body text. */
+  --ink: #1a1710;
+  --ink-60: oklch(from var(--ink) calc(l + 0.25) c h);
+
+  /* ---- The one accent ------------------------------------------------------
+     CTA fills, the available-cell dashed border, error states. Nowhere
+     else. This restriction is load-bearing for the whole design - resist
+     reaching for it as decoration. */
+  --stamp-red: #b23a2e;
+
+  /* ---- Semantic states -------------------------------------------------
+     Tuned to the warm palette rather than stock red/green. --error is the
+     accent itself, re-expressed through oklch() so error text and the
+     stamp-red accent are guaranteed to be the same red - one accent, not
+     a second one hiding under a different name. --ok is a muted, desaturated
+     verdigris-green (the color of aged brass or a notary stamp), never a
+     bright default green. */
+  --ok: oklch(52% 0.1 152);
+  --error: oklch(from var(--stamp-red) l c h);
+
+  /* ---- Ledger rule -------------------------------------------------------
+     The primary texture and depth device of this whole system, used far
+     more than shadows or gradients. --rule is a ready-to-use border
+     shorthand (`border-bottom: var(--rule);`); --rule-color is the bare
+     color for Tailwind's border/divide utilities (`border-rule`). */
+  --rule-color: oklch(from var(--ink) l c h / 0.14);
+  --rule: 1px solid var(--rule-color);
+
+  /* ---- Type ----------------------------------------------------------------
+     --font-mono-grid is the single most load-bearing typographic choice in
+     the product: every one of a million grid cells renders in it, so every
+     glyph must occupy an identical cell width regardless of what character
+     it is. Real font files are bound to these same variable names on
+     <body> in layout.tsx via next/font - see the comment there before
+     renaming anything here. */
+  --font-headline: "Instrument Serif", "Source Serif 4", Georgia, serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono-grid: "Courier Prime", "IBM Plex Mono", ui-monospace, monospace;
+
+  /* ---- Motion ----------------------------------------------------------
+     Mechanical and precise - a stamp impact, a ledger line drawing in -
+     never bouncy or floaty. Tailwind's built-in `duration-150` / `duration-400`
+     utilities already match these 1:1; reach for var(--duration-*) directly
+     only in hand-rolled JS/WAAPI animation. */
+  --duration-snap: 150ms;
+  --duration-reveal: 400ms;
+  --curve-mechanical: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ---- Radius --------------------------------------------------------------
+     An engraved or printed surface, not a rounded SaaS card. Near-zero
+     everywhere; see globals.css, which collapses Tailwind's entire radius
+     scale onto this single value so no stray `rounded-lg` can reintroduce
+     a soft corner anywhere in the app. */
+  --radius: 1px;
+}

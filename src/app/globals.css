@@ -1,0 +1,58 @@
+@import "tailwindcss";
+@import "../styles/tokens.css";
+
+/* Bridges the raw tokens above into Tailwind's utility namespace, so the
+   rest of the app reaches for `bg-parchment`, `text-ink-60`, `font-headline`,
+   `border-rule`, etc. instead of one-off hex values or inline styles. */
+@theme inline {
+  /* Surfaces */
+  --color-parchment: var(--parchment);
+  --color-parchment-aged: var(--parchment-aged);
+  --color-parchment-card: var(--parchment-card);
+
+  /* Text */
+  --color-ink: var(--ink);
+  --color-ink-60: var(--ink-60);
+
+  /* The one accent + semantic states */
+  --color-stamp-red: var(--stamp-red);
+  --color-ok: var(--ok);
+  --color-error: var(--error);
+
+  /* Ledger-rule hairline color, for `border-rule` / `divide-rule` / `text-rule` */
+  --color-rule: var(--rule-color);
+
+  /* Type. These theme keys intentionally share their exact names with the
+     next/font `variable` bound to <body> in layout.tsx. :root only ever
+     sees the plain fallback stack declared in tokens.css; <body> - the
+     ancestor of every real element on the page - declares its own value
+     with the actual loaded font, and an element's own declaration always
+     wins over one inherited from further up the tree. That is what makes
+     the swap work; it is not a stray self-reference. */
+  --font-headline: var(--font-headline);
+  --font-body: var(--font-body);
+  --font-mono-grid: var(--font-mono-grid);
+
+  /* Motion */
+  --ease-mechanical: var(--curve-mechanical);
+
+  /* Radius - collapse Tailwind's whole scale onto the engraved 1px token so
+     a stray `rounded-lg` can't reintroduce a soft SaaS corner anywhere.
+     `rounded-full` is left alone; that namespace is for true circles
+     (status dots), a different semantic than card/button rounding. */
+  --radius-xs: var(--radius);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+  --radius-2xl: var(--radius);
+  --radius-3xl: var(--radius);
+}
+
+/* One warm-paper look, committed to deliberately - no prefers-color-scheme
+   dark override. See tokens.css for the full rationale. */
+body {
+  background: var(--parchment);
+  color: var(--ink);
+  font-family: var(--font-body);
+}
