@@ -1,4 +1,4 @@
-import { getSupabasePublic, isSupabaseConfigured } from "@/lib/supabase/public";
+import { isSupabaseConfigured } from "@/lib/supabase/public";
 import { GRID_SIZE, TILE_SIZE } from "@/lib/config";
 import type { CellStatus } from "@/lib/types";
 import { tileKey, type CellBounds, type TileCoord } from "@/lib/monument/tile-math";
@@ -29,6 +29,14 @@ export interface PublicCell {
 const TILE_STALE_MS = 60_000;
 
 /**
+ * Both public reads go through this one Next route rather than PostgREST
+ * directly. A browser-to-Supabase query bypasses Cloudflare, so nothing sits
+ * between a traffic spike and the database connection pool; behind the route
+ * the edge collapses identical viewport requests into a single origin hit.
+ */
+const GRID_ENDPOINT = "/api/grid";
+
+/**
  * In-memory tile/cell cache for the canvas engine. One instance per mounted
  * MonumentExplorer. No IndexedDB - a plain Map is sufficient at this scale
  * for a first version.
@@ -56,30 +64,26 @@ export class TileDataStore {
       }
 
       try {
-        const supabase = getSupabasePublic();
-        // Assumed tile_summary columns: tile_x, tile_y, sold_count (owned by the
-        // backend-core agent). Adjust this select() if the real schema differs.
-        const { data, error } = await supabase
-          .from("tile_summary")
-          .select("tile_x, tile_y, sold_count");
+        const res = await fetch(`${GRID_ENDPOINT}?view=tiles`);
 
-        if (error || !data) {
+        if (!res.ok) {
           // Leave tileSummaries empty - Tier 0/1 fall back to flat parchment
           // until a later retry or viewport-triggered refetch succeeds.
+          console.warn("[monument/tiles] loadTileSummaries request failed", res.status);
           return;
         }
 
-        for (const row of data as { tile_x: number; tile_y: number; sold_count: number | null }[]) {
-          this.tileSummaries.set(tileKey(row.tile_x, row.tile_y), {
-            soldCount: row.sold_count ?? 0,
-          });
+        // [tile_x, tile_y, sold_count] triples, the wire shape /api/grid emits.
+        const body = (await res.json()) as { tiles?: [number, number, number][] };
+
+        for (const [tx, ty, soldCount] of body.tiles ?? []) {
+          this.tileSummaries.set(tileKey(tx, ty), { soldCount });
         }
         this.summaryVersion += 1;
       } catch (err) {
-        // A misconfigured/unreachable Supabase project must never crash the
-        // canvas - this was previously an uncaught throw from
-        // getSupabasePublic() that propagated out of this promise with no
-        // .catch() at any call site, taking down the whole page.
+        // An unreachable backend must never crash the canvas. summaryPromise is
+        // memoized, so a rejection here would also be replayed to every later
+        // caller rather than retried.
         console.warn("[monument/tiles] loadTileSummaries failed, leaving grid empty", err);
       }
     })();
@@ -185,68 +189,26 @@ export class TileDataStore {
         return;
       }
 
-      const supabase = getSupabasePublic();
+      // One request for the whole batch. The route returns every claimed cell in
+      // the box (it does the paging PostgREST forces, server-side), so a dense
+      // viewport no longer costs the browser up to 30 serial round trips. Only
+      // claimed cells come back: a cache miss already means "not claimed"
+      // everywhere getCell() is consulted.
+      const query = `view=cells&minX=${bounds.minX}&minY=${bounds.minY}&maxX=${bounds.maxX}&maxY=${bounds.maxY}`;
+      const res = await fetch(`${GRID_ENDPOINT}?${query}`);
 
-      // Only claimed cells are fetched. 'available' is the default state and
-      // the renderer draws nothing for it, so asking for it would pull tens of
-      // thousands of rows per viewport for no visual gain and, far worse, blow
-      // through PostgREST's row ceiling: the response would be silently
-      // truncated and real sold cells would vanish from the grid. Cache misses
-      // already mean "not claimed" everywhere getCell() is consulted.
-      //
-      // Paged so a densely-sold region is still fetched in full: PostgREST caps
-      // a single response (1000 rows by default), so keep requesting the next
-      // page until one comes back short. PAGE_CAP bounds the worst case.
-      const PAGE_SIZE = 1000;
-      const PAGE_CAP = 30;
-      let ok = true;
-
-      for (let page = 0; page < PAGE_CAP; page++) {
-        const from = page * PAGE_SIZE;
-        const { data, error } = await supabase
-          .from("cells_public")
-          .select("id, x, y, status, character, background_color, updated_at")
-          .neq("status", "available")
-          .gte("x", bounds.minX)
-          .lte("x", bounds.maxX)
-          .gte("y", bounds.minY)
-          .lte("y", bounds.maxY)
-          .order("id", { ascending: true })
-          .range(from, from + PAGE_SIZE - 1);
-
-        if (error) {
-          // postgrest-js reports network/5xx as `error` rather than throwing.
-          console.warn("[monument/tiles] fetchTiles query failed", error);
-          ok = false;
-          break;
-        }
-
-        const rows = (data ?? []) as {
-          id: number;
-          x: number;
-          y: number;
-          status: CellStatus;
-          character: string | null;
-          background_color: string | null;
-          updated_at: string;
-        }[];
-
-        for (const row of rows) {
-          this.cellCache.set(cellKey(row.x, row.y), {
-            id: row.id,
-            x: row.x,
-            y: row.y,
-            status: row.status,
-            character: row.character,
-            backgroundColor: row.background_color,
-            updatedAt: row.updated_at,
-          });
-        }
-
-        if (rows.length < PAGE_SIZE) break;
+      if (!res.ok) {
+        console.warn("[monument/tiles] fetchTiles request failed", res.status);
+        return;
       }
 
-      succeeded = ok;
+      const body = (await res.json()) as { cells?: PublicCell[] };
+
+      for (const cell of body.cells ?? []) {
+        this.cellCache.set(cellKey(cell.x, cell.y), cell);
+      }
+
+      succeeded = true;
     } catch (err) {
       // Same rationale as loadTileSummaries - a network/config error here
       // must degrade to "this tile stays empty for now", never crash the canvas.

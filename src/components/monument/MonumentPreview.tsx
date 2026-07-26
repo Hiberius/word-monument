@@ -21,6 +21,12 @@ const GAP = 1.5
 const STEP = CELL + GAP
 const GRIDLINE = 'rgba(26, 23, 16, 0.16)'
 
+// PostgREST caps a single response at 1,000 rows. The preview frames the
+// busiest part of the grid, so once the center fills in, an unpaged read would
+// silently drop real inscriptions from the hero. PAGE_CAP is the whole box.
+const PAGE_SIZE = 1000
+const PAGE_CAP = Math.ceil((COLS * ROWS) / PAGE_SIZE)
+
 interface PreviewCell {
   x: number
   y: number
@@ -40,31 +46,53 @@ async function getPreviewSlice(): Promise<PreviewCell[]> {
     }))
   }
 
+  // This is a server component under the homepage's revalidate window, so the
+  // read happens on the origin once a minute, not once per visitor. It stays a
+  // direct Supabase query for that reason: routing it through /api/grid would
+  // only add a Worker subrequest to every regeneration.
   try {
     const supabase = getSupabasePublic()
-    const { data, error } = await supabase
-      .from('cells_public')
-      .select('x, y, character, status, background_color')
-      // Claimed cells only. The preview draws nothing for an available cell,
-      // and the full box is 3,128 cells, which would exceed PostgREST's
-      // 1,000-row response cap and silently drop real inscriptions from the
-      // hero. Filtering keeps the result a handful of rows.
-      .neq('status', 'available')
-      .gte('x', MIN_X)
-      .lte('x', MAX_X)
-      .gte('y', MIN_Y)
-      .lte('y', MAX_Y)
+    const cells: PreviewCell[] = []
 
-    if (error || !data) return []
-    return (
-      data as { x: number; y: number; character: string | null; status: string; background_color: string | null }[]
-    ).map((r) => ({
-      x: r.x,
-      y: r.y,
-      character: r.character,
-      status: r.status,
-      backgroundColor: r.background_color,
-    }))
+    for (let page = 0; page < PAGE_CAP; page++) {
+      const from = page * PAGE_SIZE
+      const { data, error } = await supabase
+        .from('cells_public')
+        .select('x, y, character, status, background_color')
+        // Claimed cells only. The preview draws nothing for an available cell,
+        // so including them would spend the whole row budget on blanks.
+        .neq('status', 'available')
+        .gte('x', MIN_X)
+        .lte('x', MAX_X)
+        .gte('y', MIN_Y)
+        .lte('y', MAX_Y)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1)
+
+      if (error || !data) return []
+
+      const rows = data as {
+        x: number
+        y: number
+        character: string | null
+        status: string
+        background_color: string | null
+      }[]
+
+      for (const row of rows) {
+        cells.push({
+          x: row.x,
+          y: row.y,
+          character: row.character,
+          status: row.status,
+          backgroundColor: row.background_color,
+        })
+      }
+
+      if (rows.length < PAGE_SIZE) break
+    }
+
+    return cells
   } catch {
     return []
   }

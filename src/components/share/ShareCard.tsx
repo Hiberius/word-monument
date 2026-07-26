@@ -11,7 +11,10 @@ export default function ShareCard({ reservationId }: ShareCardProps) {
   const [shared, setShared] = useState<'idle' | 'shared' | 'copied'>('idle')
 
   const imageUrl = `/api/share-image/${reservationId}`
-  const shareUrl = `${SITE_URL}/monument`
+  // Every outbound share points at the buyer's own share page, not /monument:
+  // that page is the only URL whose og:image is this buyer's card, so a link
+  // posted anywhere unfurls with their words instead of the generic site card.
+  const shareUrl = `${SITE_URL}/monument/share/${encodeURIComponent(reservationId)}`
   const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(SHARE_LINE)}&url=${encodeURIComponent(shareUrl)}`
 
   async function handleShare() {

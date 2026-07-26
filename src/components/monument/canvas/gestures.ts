@@ -5,6 +5,19 @@ const TAP_MAX_DURATION_MS = 400;
 const SETTLE_DELAY_MS = 200;
 const WHEEL_ZOOM_SPEED = 0.0015;
 
+/** Wheel deltas come in three different units depending on the browser: Chrome
+ *  reports pixels (~100 per notch), Firefox reports LINES (~3 per notch) and a
+ *  few setups report pages. Reading deltaY raw makes one Firefox notch worth
+ *  about a thirtieth of a Chrome one, so everything is converted to pixels
+ *  before WHEEL_ZOOM_SPEED (tuned against the pixel unit) is applied. */
+const DOM_DELTA_LINE = 1;
+const DOM_DELTA_PAGE = 2;
+const WHEEL_LINE_PX = 16;
+
+/** Trackpad momentum can deliver a single delta worth several notches; capping
+ *  the normalized value keeps one event from flinging the zoom across tiers. */
+const WHEEL_MAX_DELTA_PX = 120;
+
 export interface ScreenPoint {
   x: number;
   y: number;
@@ -71,7 +84,7 @@ export function attachGestures(
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
-    const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SPEED);
+    const factor = Math.exp(-normalizeWheelDelta(e, vp.height) * WHEEL_ZOOM_SPEED);
     zoomAt(vp, sx, sy, factor);
     callbacks.onViewportChange();
     scheduleSettle();
@@ -186,6 +199,15 @@ export function attachGestures(
     canvas.removeEventListener("pointercancel", handlePointerUp);
     canvas.removeEventListener("pointerleave", handlePointerLeave);
   };
+}
+
+/** deltaY expressed in pixels whatever unit the browser reported it in, capped
+ *  so a burst of trackpad inertia can't overshoot. */
+function normalizeWheelDelta(e: WheelEvent, pageHeightPx: number): number {
+  let delta = e.deltaY;
+  if (e.deltaMode === DOM_DELTA_LINE) delta *= WHEEL_LINE_PX;
+  else if (e.deltaMode === DOM_DELTA_PAGE) delta *= pageHeightPx;
+  return Math.max(-WHEEL_MAX_DELTA_PX, Math.min(WHEEL_MAX_DELTA_PX, delta));
 }
 
 function distance(a: ScreenPoint, b: ScreenPoint): number {

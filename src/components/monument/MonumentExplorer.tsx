@@ -74,6 +74,21 @@ function clampPopupCoord(value: number, halfSize: number, containerSize: number 
   return Math.min(Math.max(value, min), max);
 }
 
+/** Vertical space the editor popup can actually use inside the container.
+ *  The iOS software keyboard covers the bottom of the layout viewport without
+ *  changing vp.height, so clamping against vp.height alone leaves the input and
+ *  its color picker behind the keyboard with nothing visible to type into.
+ *  visualViewport reports the region that is really on screen; where it doesn't
+ *  exist (older desktop browsers, which have no software keyboard anyway) the
+ *  viewport height stays the right answer. */
+function visibleEditorHeight(container: HTMLElement | null, fallback: number | undefined): number | undefined {
+  const visual = typeof window === "undefined" ? null : window.visualViewport;
+  if (!visual || !container) return fallback;
+  const available = Math.round(visual.offsetTop + visual.height - container.getBoundingClientRect().top);
+  if (available <= 0) return fallback;
+  return fallback === undefined ? available : Math.min(fallback, available);
+}
+
 /** Height of the selection tray currently overlapping the bottom of the canvas.
  *  On a phone it covers close to half the grid, so centering on the geometric
  *  middle would hide the buyer's own words underneath it. Measured rather than
@@ -139,9 +154,18 @@ export default function MonumentExplorer() {
   // rather than the keyboard. Focus from a pointer must NOT change the zoom;
   // only keyboard focus (Tab) brings the view to a legible tier.
   const focusFromPointerRef = useRef(false);
+  // True between pointerdown and pointerup on the canvas. The coordinate
+  // readout lives in React state, so refreshing it on every pointermove would
+  // re-render the whole explorer once per move event of a pan, fighting the
+  // rAF canvas loop this whole architecture exists to keep out of React.
+  const pointerDownRef = useRef(false);
 
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [pointer, setPointer] = useState<PointerReadout | null>(null);
+  // Vertical clamp for the editor popup, recomputed while the editor is open
+  // because the iOS keyboard resizes the visual viewport without firing a
+  // window resize or touching vp.height.
+  const [editorClampHeight, setEditorClampHeight] = useState<number | undefined>(undefined);
   const [tier, setTier] = useState(0);
   // Reposition mode: a tap moves the WHOLE cart to that spot instead of
   // opening the cell editor. Mirrored into a ref because the gesture/keyboard
@@ -478,6 +502,15 @@ export default function MonumentExplorer() {
   // focus came from a pointer and must not re-zoom.
   const handleCanvasPointerDown = useCallback(() => {
     focusFromPointerRef.current = true;
+    pointerDownRef.current = true;
+    // Retire the readout for the duration of the drag: left mounted it would
+    // sit at the pre-drag position naming a cell that is no longer under the
+    // pointer, and keeping it live costs a render per move event.
+    setPointer((prev) => (prev === null ? prev : null));
+  }, []);
+
+  const handleCanvasPointerUp = useCallback(() => {
+    pointerDownRef.current = false;
   }, []);
 
   const handleCanvasKeyDown = useCallback(
@@ -636,6 +669,9 @@ export default function MonumentExplorer() {
           setPointer(null);
           return;
         }
+        // Hover only: see pointerDownRef. A drag is a pan, and a pan must not
+        // reach React at all.
+        if (pointerDownRef.current) return;
         const cell = screenToCell(vp, screen.x, screen.y);
         setPointer({
           screenX: screen.x,
@@ -679,6 +715,25 @@ export default function MonumentExplorer() {
       inputRef.current?.select();
     });
     return () => cancelAnimationFrame(raf);
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) {
+      setEditorClampHeight(undefined);
+      return;
+    }
+    const update = () => setEditorClampHeight(visibleEditorHeight(containerRef.current, vpRef.current?.height));
+    update();
+    const visual = window.visualViewport;
+    if (!visual) return;
+    // The keyboard opening, closing, or the page being scrolled under it are
+    // all visualViewport events and nothing else: no window resize fires.
+    visual.addEventListener("resize", update);
+    visual.addEventListener("scroll", update);
+    return () => {
+      visual.removeEventListener("resize", update);
+      visual.removeEventListener("scroll", update);
+    };
   }, [editor]);
 
   function commitCharacter(char: string) {
@@ -823,6 +878,8 @@ export default function MonumentExplorer() {
         aria-label="Word Monument grid, one million cells. Arrow keys move between cells, Enter places a character, plus and minus zoom."
         aria-describedby="monument-kbd-help"
         onPointerDown={handleCanvasPointerDown}
+        onPointerUp={handleCanvasPointerUp}
+        onPointerCancel={handleCanvasPointerUp}
         onKeyDown={handleCanvasKeyDown}
         onFocus={handleCanvasFocus}
         onBlur={handleCanvasBlur}
@@ -842,7 +899,7 @@ export default function MonumentExplorer() {
           className="absolute z-20 -translate-x-1/2 -translate-y-1/2"
           style={{
             left: clampPopupCoord(editor.screenX, EDITOR_POPUP_HALF_W, vpRef.current?.width),
-            top: clampPopupCoord(editor.screenY, EDITOR_POPUP_HALF_H, vpRef.current?.height),
+            top: clampPopupCoord(editor.screenY, EDITOR_POPUP_HALF_H, editorClampHeight ?? vpRef.current?.height),
           }}
         >
           <div className="flex w-[232px] flex-col gap-2 border-2 border-ink bg-parchment-card p-2.5">
