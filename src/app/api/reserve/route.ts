@@ -9,8 +9,8 @@ import { storeReservationVariant } from '@/lib/db/heroVariants'
 import { isKnownVariantId } from '@/lib/hero/variants'
 import { isKnownColorId, bgHexForColorId } from '@/lib/monument/colors'
 import { isSupabaseConfigured } from '@/lib/supabase/public'
-import { getSupabaseAdmin, isSupabaseAdminConfigured } from '@/lib/supabase/admin'
-import { GRID_SIZE, MAX_CELLS_PER_TX, RESERVATION_TTL_SECONDS } from '@/lib/config'
+import { isSupabaseAdminConfigured } from '@/lib/supabase/admin'
+import { GRID_SIZE, MAX_CELLS_PER_TX } from '@/lib/config'
 
 const RATE_LIMIT_MAX_REQUESTS = 10
 const RATE_LIMIT_WINDOW_SECONDS = 60
@@ -28,30 +28,6 @@ async function getRateLimitKv(): Promise<KVNamespace | undefined> {
     console.warn('[api/reserve] Cloudflare context unavailable, skipping KV-backed rate limiting', error)
     return undefined
   }
-}
-
-/**
- * Hands this connection its own still-live holds back. Called ONLY once the
- * per-IP cap has already rejected a request, so it can never shorten a hold
- * that was not already in the caller's way. Scoped to a single ip hash inside
- * the RPC, which also refuses holds already extended for a live Stripe session.
- */
-async function releaseOwnHolds(ipHash: string): Promise<number> {
-  const supabase = getSupabaseAdmin()
-
-  const { data, error } = await supabase.rpc('release_ip_reservations', {
-    p_ip_hash: ipHash,
-    // Explicit rather than relying on the RPC's own default, so app config and
-    // DB behavior can never silently drift apart.
-    p_ttl_seconds: RESERVATION_TTL_SECONDS,
-  })
-
-  if (error) {
-    throw new Error(`releaseOwnHolds: release_ip_reservations RPC failed: ${error.message}`)
-  }
-
-  const released = Array.isArray(data) ? data[0] : data
-  return typeof released === 'number' ? released : Number(released ?? 0)
 }
 
 interface ReserveRequestCell {
@@ -214,59 +190,31 @@ export async function POST(request: Request) {
       return typeof raw === 'string' && isKnownColorId(raw) ? bgHexForColorId(raw) : null
     })
 
-    const reserveParams = {
-      cellIds,
-      characters,
-      reservationId,
-      ipHash,
-      backgroundColors,
-    }
-
+    // A cap rejection is a deterministic policy answer, not a server fault.
+    // Deliberately NOT self-healed by releasing this IP's holds: reserved_by_ip_hash
+    // is shared by everyone behind one NAT, CGNAT or VPN egress, so a release
+    // scoped to it would let one visitor free a stranger's hold, including one
+    // already committed to a live Stripe session.
     let result
     try {
-      result = await reserveCells(reserveParams)
+      result = await reserveCells({
+        cellIds,
+        characters,
+        reservationId,
+        ipHash,
+        backgroundColors,
+      })
     } catch (err) {
-      // Deterministic policy rejection, not a server fault: answer it as one.
       if (!(err instanceof ReserveCapExceededError)) {
         throw err
       }
-
-      // The cap counts this connection's OWN live holds, so a visitor who
-      // changes their mind and reselects is locked out by their abandoned
-      // selection for the rest of its TTL with nothing they can do about it.
-      // Give that selection back once, then retry; a second cap rejection is a
-      // real one and stands.
-      let released = 0
-      try {
-        released = await releaseOwnHolds(ipHash)
-      } catch (releaseErr) {
-        // A failed self-heal leaves the caller exactly where the cap already
-        // put them, so it must not escalate into a 500.
-        console.error('POST /api/reserve: releasing own holds failed:', releaseErr)
-      }
-
-      let retryResult: Awaited<ReturnType<typeof reserveCells>> | undefined
-      if (released > 0) {
-        try {
-          retryResult = await reserveCells(reserveParams)
-        } catch (retryErr) {
-          if (!(retryErr instanceof ReserveCapExceededError)) {
-            throw retryErr
-          }
-        }
-      }
-
-      if (!retryResult) {
-        return NextResponse.json(
-          {
-            error:
-              'You already have the maximum number of cells on hold from this connection. Complete that checkout or let it expire, then try again.',
-          },
-          { status: 429 }
-        )
-      }
-
-      result = retryResult
+      return NextResponse.json(
+        {
+          error:
+            'You already have the maximum number of cells on hold from this connection. Complete that checkout or let it expire, then try again.',
+        },
+        { status: 429 }
+      )
     }
 
     // (5) Respond.

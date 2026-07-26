@@ -158,8 +158,15 @@ export default function MonumentExplorer() {
       const comma = key.indexOf(",");
       const x = Number(key.slice(0, comma));
       const y = Number(key.slice(comma + 1));
+      // Only SOLD cells are dropped, never merely 'reserved' ones. cells_public
+      // deliberately withholds reservation_id, so a reserved cell is
+      // indistinguishable from THIS buyer's own in-flight hold: they reserve,
+      // go to /checkout, come back to the grid, and their own cells would be
+      // torn out of the cart with a message saying a stranger took them, while
+      // their Stripe session is still live. A sold cell is unambiguous: the
+      // buyer's own purchase clears the cart on /success.
       const serverCell = store.getCell(x, y);
-      if (serverCell && serverCell.status !== "available") {
+      if (serverCell && serverCell.status === "sold") {
         selectionStore.remove(x, y);
         dropped += 1;
       }

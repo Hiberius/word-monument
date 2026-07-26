@@ -86,8 +86,16 @@ function normalizeForCheck(message: string): string {
 // Grid text is assembled straight from the cells, with no spaces between
 // words, so a multi-word term can only ever match once the separators are
 // stripped from both the message and the term.
+//
+// Everything that is not a letter or a digit counts as a separator, rather
+// than a hand-listed set. ALLOWED_PUNCTUATION (see moderation/charset.ts) lets
+// a buyer place @ # ! ? & + / : ; ( ) and quotes into cells, so any fixed list
+// leaves a trivial bypass: "kill@yourself" reads perfectly on the grid but
+// slips past a list that only knows about spaces, dashes and dots. Deriving
+// the class instead of listing it keeps this correct if the allowed punctuation
+// ever changes.
 function stripSeparators(value: string): string {
-  return value.replace(/[\s\-_.,*]/g, '');
+  return value.replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 function escapeRegExp(value: string): string {
