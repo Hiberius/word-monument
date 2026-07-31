@@ -100,54 +100,59 @@ async function getPreviewSlice(): Promise<PreviewCell[]> {
 
 export default async function MonumentPreview() {
   const cells = await getPreviewSlice()
-  const byPosition = new Map(cells.map((cell) => [`${cell.x},${cell.y}`, cell]))
 
   const width = COLS * STEP
   const height = ROWS * STEP
 
-  const rects: React.ReactNode[] = []
-  for (let row = 0; row < ROWS; row++) {
-    for (let col = 0; col < COLS; col++) {
-      const ax = MIN_X + col
-      const ay = MIN_Y + row
-      const cell = byPosition.get(`${ax},${ay}`)
-      const sold = cell?.status === 'sold'
-      const px = col * STEP
-      const py = row * STEP
-      const bg = sold ? cell?.backgroundColor ?? INK : PARCHMENT
+  // Only claimed cells get their own SVG node. The empty grid behind them is a
+  // single tiled <pattern>.
+  //
+  // This used to emit one <rect> per cell across the whole 92x34 window, which
+  // is 3,128 elements, and it made the homepage document roughly a megabyte of
+  // markup before any of it was even visible. That is the page a traffic spike
+  // lands on first, and it was spending almost all of its weight drawing empty
+  // squares. The pattern renders identically for a fraction of the bytes, and
+  // the cost now scales with how much of the monument is actually claimed
+  // rather than with the size of the window onto it.
+  const nodes: React.ReactNode[] = []
+  let soldCount = 0
 
-      rects.push(
-        <rect
-          key={`${col}-${row}`}
-          x={px}
-          y={py}
-          width={CELL}
-          height={CELL}
-          fill={bg}
-          stroke={sold ? 'none' : GRIDLINE}
-          strokeWidth={0.75}
-        />,
+  for (const cell of cells) {
+    if (cell.status !== 'sold') continue
+
+    const col = cell.x - MIN_X
+    const row = cell.y - MIN_Y
+    // getPreviewSlice already queries this box, but demo data and a future
+    // change to the query are not obliged to respect it.
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) continue
+
+    soldCount += 1
+
+    const px = col * STEP
+    const py = row * STEP
+    const bg = cell.backgroundColor ?? INK
+
+    // Opaque and unstroked, covering the patterned cell underneath exactly.
+    nodes.push(
+      <rect key={`${col}-${row}`} x={px} y={py} width={CELL} height={CELL} fill={bg} />,
+    )
+
+    if (cell.character) {
+      nodes.push(
+        <text
+          key={`${col}-${row}-char`}
+          x={px + CELL / 2}
+          y={py + CELL / 2 + 3.5}
+          textAnchor="middle"
+          fontSize={9.5}
+          fontFamily="var(--font-mono-grid, monospace)"
+          fill={contrastGlyphColor(bg)}
+        >
+          {cell.character.toUpperCase()}
+        </text>,
       )
-
-      if (sold && cell?.character) {
-        rects.push(
-          <text
-            key={`${col}-${row}-char`}
-            x={px + CELL / 2}
-            y={py + CELL / 2 + 3.5}
-            textAnchor="middle"
-            fontSize={9.5}
-            fontFamily="var(--font-mono-grid, monospace)"
-            fill={contrastGlyphColor(bg)}
-          >
-            {cell.character.toUpperCase()}
-          </text>,
-        )
-      }
     }
   }
-
-  const soldCount = cells.filter((cell) => cell.status === 'sold').length
 
   return (
     <section aria-label="Monument preview" className="border-b border-ink bg-parchment">
@@ -163,8 +168,31 @@ export default async function MonumentPreview() {
           aria-label="The heart of the monument, showing the founding inscription and nearby inscriptions. Select to explore the full grid."
           className="block h-[46vh] max-h-[560px] min-h-[280px] w-full transition-[filter] duration-300 group-hover:brightness-[0.97]"
         >
+          <defs>
+            {/* One tile, repeated by the renderer, in place of a rect per cell.
+                The cell is inset by half the stroke width so its outline lands
+                exactly on the 0..CELL box an unstroked sold cell paints over,
+                and so the stroke is not clipped at the edge of the tile. */}
+            <pattern
+              id="monument-preview-grid"
+              width={STEP}
+              height={STEP}
+              patternUnits="userSpaceOnUse"
+            >
+              <rect
+                x={0.375}
+                y={0.375}
+                width={CELL - 0.75}
+                height={CELL - 0.75}
+                fill={PARCHMENT}
+                stroke={GRIDLINE}
+                strokeWidth={0.75}
+              />
+            </pattern>
+          </defs>
           <rect x={0} y={0} width={width} height={height} fill={PARCHMENT} />
-          {rects}
+          <rect x={0} y={0} width={width} height={height} fill="url(#monument-preview-grid)" />
+          {nodes}
         </svg>
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 border-t border-ink bg-parchment px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
