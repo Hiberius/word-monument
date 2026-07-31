@@ -50,3 +50,7 @@ next-env.d.ts
 # local-only AI session manifest - references local absolute paths and other
 # private projects on this machine, never meant to be pushed
 CLAUDE.md
+
+# Operator-only notes, never published
+PARTIAMO.md
+docs/LAUNCH.md
