@@ -1,148 +1,220 @@
-# Word Monument
+# I'm selling one million letters on the internet, a dollar each, forever
 
-Word Monument sells permanent, individually numbered words engraved into a public digital monument - each word is purchased once, reserved briefly during checkout, and then locked in forever once payment succeeds. The app is a Next.js 15 site backed by Supabase (reservations, ledger, content moderation) and Stripe (payment), deployed as a Cloudflare Worker via OpenNext.
+**[wordmonument.com](https://wordmonument.com)** is a grid of 1,000,000 cells.
+Each cell holds exactly one character. Each cell costs exactly one dollar. Each
+cell sells exactly once, ever. You pick your cells, you type your word, you pay,
+and what you wrote stays on the monument permanently. No edits, no resale, no
+accounts, no feed, no algorithm. When the grid is full, it closes forever.
 
-## Local setup
+In 2005, a student named Alex Tew sold a million pixels for a dollar each to pay
+for university, and the Million Dollar Homepage became one of the strangest
+success stories of the early web. Twenty years later his page is still up, and
+it is a graveyard: most of the links are dead, the companies are gone, the
+banners point at nothing. It turns out pixels sold to advertisers age like
+advertising.
+
+This project is the same bet with the variable flipped: sell to people instead
+of companies, and sell letters instead of pixels. Nobody has an emotional
+attachment to a pixel. A letter is a name, a date, a person you lost, a joke
+only four people understand. The Million Dollar Homepage was a billboard. This
+is a monument.
+
+This repo is the whole thing: the site, the payment pipeline, the moderation
+system, the million-cell renderer, and every migration, exactly as deployed.
+This README is the story of the four problems that turned out to be hard.
+
+---
+
+## Problem 1: never sell the same cell twice
+
+This is the entire product. Sell a cell twice and you have either taken money
+for nothing or destroyed the one promise the product makes. Everything else can
+be mediocre; this cannot.
+
+The naive flow (check if available, then write) is a race condition with a
+credit card attached. Two buyers hit the same cell within milliseconds, both
+checks pass, both get charged. So the whole flow is built backwards from that
+failure:
+
+- **Reservations are atomic.** A single Postgres function locks the candidate
+  rows with `SELECT ... FOR UPDATE` in ascending id order (constant order means
+  two overlapping requests cannot deadlock each other), and either reserves
+  every requested cell or reserves nothing and tells you exactly which cells
+  you lost. There is no separate "check" step to race against.
+- **The reservation TTL and the Stripe session are the same clock.** Stripe's
+  hosted checkout can keep a session alive for about 30 minutes minimum. A
+  10-minute database hold with a 30-minute payment page is a double-sell with
+  extra steps: the hold expires, someone else buys the cell, the first payment
+  still lands. Here the hold is 35 minutes and the Stripe session is set to
+  expire at the same instant, so the two windows cannot disagree by
+  construction.
+- **The webhook is the only thing that marks cells sold**, it verifies Stripe's
+  HMAC signature before parsing anything, and it is idempotent: every event id
+  lands in a table with a unique constraint, so Stripe's retries (which are a
+  feature, not a bug) cannot double-apply a purchase.
+- **When the race happens anyway**, because a payment can always arrive after a
+  sweep released the hold, the webhook refunds the exact shortfall
+  automatically and writes the case to an anomalies table. Auditable, not
+  silent.
+- **Expired holds are swept** by a cron running `FOR UPDATE SKIP LOCKED`, so
+  the sweeper can never block, or be blocked by, a purchase completing in the
+  same instant.
+
+The test suite for this runs against a real PostgreSQL with every migration
+applied, fires concurrent reservations at intersecting cell sets, and asserts
+that no cell ever ends up owned twice. Forty assertions. The two times a test
+failed, the test was wrong and the code was right, which is the outcome you
+want from a suite you wrote after designing for the race from day one.
+
+## Problem 2: Stripe's SDK does not survive Cloudflare Workers
+
+The official `stripe` npm package hangs on Workers. Not errors: hangs. It
+assumes Node's HTTP agent internals that the Workers runtime does not provide,
+and `stripe.checkout.sessions.create()` simply never resolves.
+
+So the Stripe client here is about a hundred lines of hand-rolled `fetch`
+against `api.stripe.com/v1`: form-encoded bodies, an `AbortController` timeout,
+and nothing else. Webhook signatures are verified with `crypto.subtle`, which
+Workers provide natively: read the raw body before parsing, cap its size,
+reject timestamps older than five minutes to kill replays, constant-time
+compare the HMAC.
+
+The same reasoning applies to the OpenAI moderation call: raw `fetch`, no SDK.
+The rule that fell out of this project: on Workers, an SDK is a liability you
+adopt, and a REST API is a contract you can hold in one file.
+
+## Problem 3: draw a million cells without melting anything
+
+A million DOM nodes is not a web page, it is a crime scene. The grid is one
+`<canvas>` with a renderer that picks a level of detail from pixels-per-cell:
+
+1. Zoomed all the way out, the whole monument is one bitmap built from a
+   400-row density rollup (the million cells divide into 400 tiles of 50x50).
+2. Closer, each tile is a solid rectangle. Still no per-cell data on the wire.
+3. Closer still, real cells appear as rectangles.
+4. Close enough to read, glyphs render in a monospace face, and an HTML overlay
+   shows the registry coordinates under your cursor.
+
+Pan and zoom never touch React. The viewport lives in a mutable ref, gestures
+write to it directly, and a `requestAnimationFrame` loop repaints. React state
+updates happen when you select a cell, not sixty times a second while you drag.
+Wheel deltas are normalized per browser (Chrome reports pixels, Firefox reports
+lines, and if you read `deltaY` raw, one Firefox notch is worth a thirtieth of
+a Chrome one).
+
+Cell data arrives through one cached API route in tile-aligned bounding boxes.
+The route snaps every requested box outward to tile edges, and the edge cache
+key is derived from the snapped bounds, not the raw URL, so panning by one cell
+(or an attacker jittering the coordinates) cannot mint fresh cache entries. A
+viral traffic spike hits Cloudflare's edge, not the database connection pool.
+This matters because the traffic spike is the point of the product; the one
+moment everything works is the one moment everything is on fire.
+
+## Problem 4: people will type things you do not want to sell
+
+Selling permanent public text for a dollar is an invitation. Moderation is two
+layers on purpose:
+
+- **Before a reservation exists**: the characters themselves are an explicit
+  allowlist (letters, digits, a small punctuation set, a curated emoji list
+  compared by exact string, because Unicode grapheme tricks are a real attack
+  surface). The assembled message is checked against a blocklist in grid
+  reading order, not selection order, so you cannot hide a slur by buying its
+  letters out of sequence. Normalization catches the homoglyph games. This
+  gate runs before the hold because a reservation locks cells away from real
+  buyers for 35 minutes, and letting garbage burn hold slots is a denial of
+  service on people trying to pay you.
+- **After payment**: an async moderation check runs on sold content and flags
+  rather than deletes, a public report button exists on every sold cell, and a
+  password-gated admin queue reviews flags. Removal blanks the cell
+  permanently and logs the action. The cell is not resold.
+
+The failure mode that cannot be prevented in software: two innocent purchases
+landing next to each other and reading as something else. That one is policy,
+reporting, and a fast admin, not code.
+
+## The stack, and why it is boring on purpose
+
+| Piece | Choice | The reason |
+|---|---|---|
+| Framework | Next.js 15, App Router | Server rendering for the pages crawlers read, client canvas for the grid |
+| Runtime | Cloudflare Workers via OpenNext | The whole site runs at the edge; there is no origin server to fall over |
+| Database | Supabase Postgres | The concurrency model above is row locks and `SECURITY DEFINER` functions; you want a real Postgres for that |
+| Payments | Stripe hosted Checkout | Card data never touches this codebase, and the hosted page is the one thing buyers already trust |
+| Cache | R2 + KV + the edge Cache API | ISR pages in R2, rate limiting in KV, grid reads in the edge cache |
+| State | A hand-rolled store on `useSyncExternalStore` | The cart is a Set and a subscribe function; a state library would be more code than the state |
+| Auth | None for buyers, one password for the admin | Accounts are a database of emails waiting to leak; the product does not need them |
+
+The database privileges deserve one sentence: every table denies everything by
+default, the public surface is a single column-allowlisted view plus explicit
+SELECT-only policies, and the browser's anon key physically cannot write to the
+grid. This is verified by a test that replays Supabase's own permissive
+bootstrap grants and then proves the anon role still cannot flip a sold cell.
+(If you run Supabase yourself, check what its bootstrap grants to `anon` on
+views: the answer surprised me, and it is the closest this project came to
+shipping a grid a stranger could erase.)
+
+There are also no analytics, no tracking pixels, and no cookies beyond the
+admin's session. Not as a flex: the product genuinely does not need to know who
+you are, and the privacy page is shorter and truer for it.
+
+## Rules of the monument
+
+1. One dollar per cell, one character per cell.
+2. Every cell sells exactly once. No edits, no resale, no exceptions.
+3. Nobody can buy more than 300 cells in one purchase, so nobody buys the
+   center of the grid in an afternoon.
+4. What you write is permanent, unless it breaks the content policy, in which
+   case it is removed and the cell dies with it. Removed is not resold.
+5. When the millionth cell sells, the monument closes. There is no second
+   monument.
+
+## Run it yourself
 
 ```bash
+git clone https://github.com/Hiberius/word-monument
+cd word-monument
 npm install
-cp .env.example .env.local   # fill in the values described below
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+With no configuration it runs in demo mode with generated content and payments
+disabled, which is enough to explore everything above. Wiring a real Supabase
+project, Stripe test keys and the Cloudflare deployment is covered in
+[docs/SETUP.md](docs/SETUP.md).
 
-Fill in `.env.local` with:
+## Questions people actually ask
 
-- Your Supabase project's URL, anon key, and service role key.
-- Test-mode Stripe keys (see below).
-- A Turnstile site key/secret pair (test keys are fine locally).
-- An OpenAI API key, if the content-moderation path needs it locally.
-- An `ADMIN_PASSWORD_HASH` generated with `bcryptjs` (never store a plaintext password) and a random `ADMIN_SESSION_SECRET` (32+ bytes) for the admin session cookie.
-- A `CRON_SECRET` value - the shared-secret header the cron routes expect.
-- An `IP_HASH_SECRET` (32+ bytes) - the HMAC key used to pseudonymize IPs. **Required**: the rate limiter throws at startup if it's missing.
+**Is this the Million Dollar Homepage?**
+It is a tribute to it and an argument with it, in equal parts. Same economics,
+opposite audience: Tew sold to advertisers, this sells to people. His page
+became a wall of dead links because everything on it pointed elsewhere.
+Nothing here points anywhere; the words are the destination.
 
-Generate the random secrets with either:
+**Why would anyone pay a dollar for a letter?**
+The same reason people carve initials into benches and pay for stars they will
+never visit. It is not a rational purchase, it is a small permanent mark. The
+expected purchase is a word, not a letter: a name at $7, a date at $10, a
+sentence at $40.
 
-```bash
-openssl rand -base64 48          # ADMIN_SESSION_SECRET / CRON_SECRET / IP_HASH_SECRET
-node -e "console.log(require('bcryptjs').hashSync(process.argv[1], 12))" 'your-admin-password'   # ADMIN_PASSWORD_HASH
-```
+**What stops you from deleting it all next year?**
+Less than you would like, honestly: a public promise, the terms of service,
+and the fact that the entire codebase and its history are in this repo for
+anyone to fork. Permanence on the internet is a practice, not a property.
+The honest version of the promise: the monument outlives interest, or it
+never mattered.
 
-## Supabase schema
+**What happens when it sells out?**
+It closes to new purchases and stays up. Selling out is the finished state,
+not the successful one.
 
-Apply **every** migration in `supabase/migrations/`, in filename order (`0001`
-through the highest-numbered file). Skipping any of them leaves the app broken
-in ways that are not obvious: the reservation RPC gains its per-cell colour
-argument in `0008`, checkout hardening lands in `0009`, and `0010` is what makes
-the public counters readable and stops the public anon key from writing to the
-grid. With the [Supabase CLI](https://supabase.com/docs/guides/cli):
+**Can I buy a whole region and write a manifesto?**
+Up to 300 cells per purchase, and the content policy applies to what you
+write. Beyond that, the grid is first come, first carved.
 
-```bash
-supabase link --project-ref <your-project-ref>
-supabase db push
-```
+---
 
-Or paste each migration's SQL into the Supabase dashboard SQL editor, oldest first. `0001` also seeds all 1,000,000 `cells` rows; if it hits the statement timeout, run it in batches. Until a real project is connected the app runs in demo mode (local stand-in content, no writes) - see `src/lib/supabase/public.ts`.
-
-## Running Stripe in test mode
-
-1. Use a Stripe test-mode key for `STRIPE_SECRET_KEY` (no publishable key is needed: the app redirects to Stripe's hosted Checkout page). A restricted key (`rk_…`) works, but it must grant write access to **Checkout Sessions** and **Refunds** (and read on **PaymentIntents**) or the flow will 4xx.
-2. Install the [Stripe CLI](https://stripe.com/docs/stripe-cli) and log in (`stripe login`).
-3. Forward webhooks to the local webhook route and copy the printed signing secret into `STRIPE_WEBHOOK_SECRET`:
-
-   ```bash
-   stripe listen --forward-to localhost:3000/api/webhooks/stripe
-   ```
-
-4. Trigger events on demand while developing, e.g.:
-
-   ```bash
-   stripe trigger checkout.session.completed
-   stripe trigger checkout.session.expired
-   ```
-
-## Deploying
-
-Deploy is a manual, locally-run flow - CI (`.github/workflows/ci.yml`) only ever runs lint, typecheck, and a plain `next build`, and never touches Cloudflare or Supabase secrets.
-
-```bash
-npm run ship
-```
-
-`ship` runs a Next.js build, the OpenNext Cloudflare build, the Cloudflare deploy, and a post-deploy smoke-test placeholder, in that order.
-
-### One-time setup (before the first deploy)
-
-1. Create the two KV namespaces and paste the returned ids into `wrangler.toml`:
-
-   ```bash
-   npx wrangler kv namespace create NEXT_INC_CACHE_KV
-   npx wrangler kv namespace create RATE_LIMIT
-   ```
-
-2. Create the R2 bucket used for the incremental cache:
-
-   ```bash
-   npx wrangler r2 bucket create word-monument-cache
-   ```
-
-3. Set the server-only secrets on the Worker. These are read at runtime, so
-   `wrangler secret` is the right home for them:
-
-   ```bash
-   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-   npx wrangler secret put STRIPE_SECRET_KEY
-   npx wrangler secret put STRIPE_WEBHOOK_SECRET
-   npx wrangler secret put TURNSTILE_SECRET_KEY
-   npx wrangler secret put OPENAI_API_KEY
-   npx wrangler secret put ADMIN_PASSWORD_HASH
-   npx wrangler secret put ADMIN_SESSION_SECRET
-   npx wrangler secret put CRON_SECRET
-   npx wrangler secret put IP_HASH_SECRET
-   ```
-
-4. **Every `NEXT_PUBLIC_*` value must be present when you BUILD, not on the
-   Worker.** Next.js inlines `NEXT_PUBLIC_*` into the JavaScript bundle at build
-   time, so a `wrangler secret` or a `[vars]` entry can never reach the browser:
-   the client would read `undefined`. In practice that means the Turnstile
-   widget never renders and nobody can complete a checkout, with no error to
-   explain it.
-
-   Put them in `.env.local` (gitignored) or export them in whatever shell or CI
-   job runs the build, then build and deploy:
-
-   ```bash
-   # .env.local, read automatically by `npm run build:cf`
-   NEXT_PUBLIC_SITE_URL=https://your-domain.com
-   NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
-   NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x...
-   ```
-
-   `NEXT_PUBLIC_SITE_URL` in particular is baked into canonical tags, the
-   sitemap, OG image URLs and the Stripe success/cancel URLs, so changing your
-   domain means rebuilding, not just editing config. Re-run `npm run build:cf &&
-   npm run deploy:cf` after any change to these.
-
-## Before going live
-
-- [ ] Apply **all** migrations, including `0010` (locks the public read surface)
-      and `0011` (stops a stale Stripe expiry event from freeing a live hold).
-      Verify afterwards that the anon key cannot write:
-      `PATCH /rest/v1/cells_public` must return a permission error, and
-      `GET /rest/v1/monument_stats` must return a row rather than an empty array.
-- [ ] Build with every `NEXT_PUBLIC_*` set (see the deploy section). Confirm the
-      Turnstile widget actually renders on `/checkout` in the deployed build:
-      if it is missing, the values did not reach the bundle and no one can pay.
-- [ ] Point `NEXT_PUBLIC_SITE_URL` at the real domain and rebuild, then check a
-      page's canonical tag and `/sitemap.xml` show that domain.
-- [ ] Decide whether both the apex and `www` resolve to the Worker. Both work
-      with the current origin check, but pick one as canonical and redirect the
-      other so search engines and OG links agree.
-- [ ] Run a full Stripe test-mode run-through: a successful payment, a failed payment, an abandoned checkout, and a webhook retry - before switching to live keys.
-- [ ] Swap the operator identity placeholder (`OPERATOR_NAME` / `CONTACT_EMAIL` in `src/lib/site.ts`) for the real legal entity name and a monitored business email - it appears on the legal pages and the About contact section.
-- [ ] Load-test the reservation endpoint to confirm no double-sells occur under concurrent requests (and that the per-IP advisory lock in `reserve_cells_atomic` holds the per-IP cap under concurrency).
-- [ ] Harden the CSP: replace `script-src 'unsafe-inline'` in `next.config.ts` with a per-request nonce (see `rules/web/security.md`) so CSP is real XSS defense-in-depth, not just a present header. Verify the Stripe/Turnstile embeds still load.
-- [ ] Get a legal review of the Terms and Content Policy language.
-- [ ] Confirm the real domain is registered and pointed at the deployment.
+Built by one person. The commit history is the honest build log, arguments
+with reviewers included. If you write something on the monument that means
+something, the operator would genuinely like to know the story:
+hello@wordmonument.com.
