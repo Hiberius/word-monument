@@ -97,12 +97,26 @@ function cellsToEntry(
   }
 }
 
+/**
+ * Whether the ?text= preview override may be honoured.
+ *
+ * This used to be gated on "demo mode", on the reasoning that production would
+ * always have Supabase configured. That assumption was wrong the moment the
+ * real domain went live before the database did, and the consequence was not
+ * cosmetic: ?text= renders arbitrary attacker text into a card captioned
+ * CERTIFICATE OF INSCRIPTION, served from this domain, which Slack, Discord,
+ * iMessage and X all unfurl inline as a genuine artifact. On a domain being
+ * posted publicly that is a ready-made scam lure.
+ *
+ * Gated on the build environment instead, which is a fact about how the code
+ * was compiled rather than a guess about how it was deployed.
+ */
+const ALLOW_PREVIEW_TEXT = process.env.NODE_ENV !== 'production'
+
 function demoEntry(overrideText?: string | null): ShareEntry {
   const d = demoShareEntry()
-  // Local-only preview override (?text=) so the card can be eyeballed with any
-  // message while iterating. Gated to demo mode by the caller; production has
-  // Supabase configured, so this branch never runs there.
-  const message = (overrideText ?? d.message).slice(0, 90)
+  const requested = ALLOW_PREVIEW_TEXT ? overrideText : null
+  const message = (requested ?? d.message).slice(0, 90)
   const cellCount = message.replace(/ /g, '').length
   return {
     glyphs: messageToGlyphs(message, d.backgroundColor),
@@ -160,8 +174,27 @@ function MetaCell({ label, value, last = false }: { label: string; value: string
   )
 }
 
+/** Reservation ids are uuids. Anything else cannot name a real card. */
+const RESERVATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** The one id that is not a uuid: the sample card the marketing pages link to. */
+const DEMO_RESERVATION_ID = 'demo'
+
 export async function GET(request: Request, { params }: { params: Promise<{ reservationId: string }> }) {
   const { reservationId } = await params
+
+  // Rejected before any work happens. This is the most expensive endpoint on
+  // the site (a Satori layout plus a resvg WASM rasterization of a 1200x630
+  // PNG, hundreds of milliseconds of Worker CPU each), and robots.txt invites
+  // crawlers into it so unfurl bots can fetch real cards. Without this gate an
+  // unbounded space of junk ids each buys a full render, which is a cheap way
+  // to burn the CPU budget of the whole site from one laptop.
+  if (reservationId !== DEMO_RESERVATION_ID && !RESERVATION_ID_PATTERN.test(reservationId)) {
+    return new Response('Not found', {
+      status: 404,
+      headers: { 'Cache-Control': 'public, max-age=0, s-maxage=3600' },
+    })
+  }
 
   // Per-IP rate limit (fails open on a KV outage, like the rest of the app).
   const ipHash = await hashIp(getClientIp(request.headers))

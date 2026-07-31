@@ -60,7 +60,11 @@ export async function GET(request: Request): Promise<NextResponse> {
   const view = params.get('view');
 
   if (view === 'tiles') {
-    return withEdgeCache(`${url.origin}/api/grid?view=tiles`, tileSummariesResponse);
+    return withEdgeCache(
+      `${url.origin}/api/grid?view=tiles`,
+      TILE_CACHE_CONTROL,
+      tileSummariesResponse
+    );
   }
 
   if (view === 'cells') {
@@ -76,7 +80,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       bounds === null
         ? `${url.origin}/api/grid?view=cells&empty=1`
         : `${url.origin}/api/grid?view=cells&minX=${bounds.minX}&minY=${bounds.minY}&maxX=${bounds.maxX}&maxY=${bounds.maxY}`;
-    return withEdgeCache(key, () => cellsResponse(bounds));
+    return withEdgeCache(key, CELL_CACHE_CONTROL, () => cellsResponse(bounds));
   }
 
   return badRequest("view must be 'tiles' or 'cells'");
@@ -101,6 +105,7 @@ export async function GET(request: Request): Promise<NextResponse> {
  */
 async function withEdgeCache(
   cacheKeyUrl: string,
+  cacheControl: string,
   compute: () => Promise<NextResponse>
 ): Promise<NextResponse> {
   const cache = await openEdgeCache();
@@ -110,7 +115,18 @@ async function withEdgeCache(
 
   try {
     const hit = await cache.match(cacheKey);
-    if (hit) return new NextResponse(hit.body, hit);
+    if (hit) {
+      // The stored response is replayed with its Cache-Control rewritten from
+      // the constants above rather than copied verbatim. Cloudflare stamps its
+      // zone Browser Cache TTL onto what comes back out of caches.default, so
+      // a hit was leaving here as max-age=14400: the grid would sit in each
+      // visitor's own browser for four hours, and a buyer returning from
+      // checkout would not see the cell they just paid for. That is the exact
+      // outcome max-age=0 was chosen to prevent.
+      const headers = new Headers(hit.headers);
+      headers.set('Cache-Control', cacheControl);
+      return new NextResponse(hit.body, { status: hit.status, headers });
+    }
   } catch {
     // Fall through to a live computation rather than failing the request.
   }

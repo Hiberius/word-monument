@@ -54,10 +54,22 @@ const worker = {
    */
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (url.hostname.startsWith("www.")) {
-      url.hostname = url.hostname.slice("www.".length);
+    const isCleartext = url.protocol === "http:";
+    const isWww = url.hostname.startsWith("www.");
+
+    // Cleartext is upgraded here rather than left to Cloudflare's "Always Use
+    // HTTPS" toggle, because a dashboard switch is not visible in review and
+    // was in fact off when the domain went live: port 80 served the entire
+    // site, admin login included. The HSTS header cannot rescue that first
+    // hit, since RFC 6797 requires browsers to ignore an STS header that
+    // arrives over cleartext. Doing both redirects in one hop also avoids
+    // sending http://www through an http apex on the way to https.
+    if (isCleartext || isWww) {
+      if (isCleartext) url.protocol = "https:";
+      if (isWww) url.hostname = url.hostname.slice("www.".length);
       return Response.redirect(url.toString(), 308);
     }
+
     return handler.fetch(request, env, ctx);
   },
 
