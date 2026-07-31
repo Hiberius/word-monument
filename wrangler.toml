@@ -1,9 +1,12 @@
 # Word Monument - Cloudflare Workers config (OpenNext-on-Cloudflare).
 #
-# One-time setup required before the first deploy:
-#   1. Create the two KV namespaces and replace the placeholder "id" values below:
+# One-time setup when standing this up on a NEW Cloudflare account (the ids
+# below belong to the account this deploys to; namespace ids are inert
+# identifiers, not secrets):
+#   1. Create the three KV namespaces and replace the "id" values below:
 #        npx wrangler kv namespace create NEXT_INC_CACHE_KV
 #        npx wrangler kv namespace create RATE_LIMIT
+#        npx wrangler kv namespace create WAITLIST
 #   2. Create the R2 bucket referenced below:
 #        npx wrangler r2 bucket create word-monument-cache
 #   3. Set every secret listed in .env.example via `wrangler secret put <NAME>`
@@ -46,6 +49,13 @@ id = "0492364761b945ca8b5325d68c841287"
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
 id = "716fe347f7c54ea99f1bbcf0fe554e99"
+
+# Launch notify list. Deliberately KV rather than Supabase: it has to work in
+# exactly the window where Supabase is NOT yet connected, which is the only
+# time the form is rendered at all.
+[[kv_namespaces]]
+binding = "WAITLIST"
+id = "9ddaee6a0cc546e5afa2db16fd486d60"
 
 # Apex and www both point at this Worker. www exists only so typing it does not
 # hit a DNS failure; custom-worker.ts 308s it onto the apex, which is the single

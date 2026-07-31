@@ -44,7 +44,7 @@ const SUBPROCESSORS = [
   {
     name: 'Cloudflare',
     role: 'Hosting, CDN & bot protection (Turnstile)',
-    body: 'Cloudflare serves the site from its global edge network and runs Turnstile, the challenge that verifies you are a person rather than an automated script before a purchase. As the network in front of the site, Cloudflare processes connection metadata (including your IP address in transit) to route requests and block attacks, and may keep short-lived operational logs for security. It does not receive the contents of your payment.',
+    body: 'Cloudflare serves the site from its global edge network and runs Turnstile, the challenge that verifies you are a person rather than an automated script before a purchase. As the network in front of the site, Cloudflare processes connection metadata (including your IP address in transit) to route requests and block attacks, and may keep short-lived operational logs for security. It also stores, in its KV storage, the address and join date of anyone on the launch notify list, as described above. It does not receive the contents of your payment.',
   },
   {
     name: 'OpenAI',
@@ -112,6 +112,16 @@ export default function PrivacyPage() {
               We do not store your raw IP. We store a short, keyed hash of it,
               used purely to enforce per-visitor limits and stop abuse,
               detailed in its own section below.
+            </li>
+            <li>
+              <strong className="text-ink">An email address, only if you join the launch notify list.</strong>{' '}
+              While claiming is not yet open, the site offers a one-field form
+              to be told when it is. If you use it we store exactly two things:
+              the address you typed and the date you joined, in Cloudflare KV.
+              No IP address, no hash, nothing else is stored with it. It is
+              used for a launch announcement and nothing further, and you can
+              have it removed at any time by writing to the contact address
+              below.
             </li>
             <li>
               <strong className="text-ink">The text you place, sent for automated moderation.</strong>{' '}
@@ -364,6 +374,11 @@ export default function PrivacyPage() {
               <strong className="text-ink">Checkout email, if provided:</strong>{' '}
               kept for order support and required record-keeping, then removed on
               request or when no longer needed.
+            </li>
+            <li>
+              <strong className="text-ink">Launch notify list email:</strong>{' '}
+              kept until the launch announcement has been sent, then deleted.
+              Removed earlier at any time on request.
             </li>
           </ul>
         </Section>

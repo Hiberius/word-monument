@@ -74,12 +74,25 @@ npm run ship
 
 ### One-time setup (before the first deploy)
 
-1. Create the two KV namespaces and paste the returned ids into `wrangler.toml`:
+1. Create the three KV namespaces and paste the returned ids into `wrangler.toml`:
 
    ```bash
    npx wrangler kv namespace create NEXT_INC_CACHE_KV
    npx wrangler kv namespace create RATE_LIMIT
+   npx wrangler kv namespace create WAITLIST
    ```
+
+   WAITLIST holds the launch notify list the site collects while it runs in
+   preview mode. To export the addresses later (each key is `email:<address>`,
+   the id below is the one bound in `wrangler.toml`):
+
+   ```bash
+   npx wrangler kv key list --namespace-id=9ddaee6a0cc546e5afa2db16fd486d60 \
+     | python3 -c "import json,sys;[print(k['name'][6:]) for k in json.load(sys.stdin) if k['name'].startswith('email:')]"
+   ```
+
+   The privacy policy promises these are deleted once the launch announcement
+   has gone out: after sending it, delete the keys, not just the export.
 
 2. Create the R2 bucket used for the incremental cache:
 

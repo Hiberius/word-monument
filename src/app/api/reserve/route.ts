@@ -89,7 +89,7 @@ export async function POST(request: Request) {
         {
           error: 'preview',
           message:
-            'This is a live preview - claiming words switches on once the monument’s backend is connected.',
+            'This is a live preview - claiming is not open yet. Join the notify list at the top of the page and you will get one email when it is.',
         },
         { status: 503 }
       )

@@ -1,4 +1,6 @@
 import HeroCopy from '@/components/hero/HeroCopy'
+import LaunchNotice from '@/components/home/LaunchNotice'
+import { isSupabaseConfigured } from '@/lib/supabase/public'
 import MonumentPreview from '@/components/monument/MonumentPreview'
 import LiveCounters from '@/components/counters/LiveCounters'
 import MessageCalculator from '@/components/hero/MessageCalculator'
@@ -27,6 +29,10 @@ export default async function HomePage() {
 
   return (
     <>
+      {/* Rendered only while the backend is disconnected: the build-time gate
+          means connecting Supabase and redeploying removes it site-wide. */}
+      {!isSupabaseConfigured() && <LaunchNotice />}
+
       <MonumentPreview />
 
       <section aria-labelledby="hero-heading" className="relative border-b border-ink bg-parchment">

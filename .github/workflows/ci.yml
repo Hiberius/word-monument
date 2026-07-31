@@ -24,6 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # cloudflare-env.d.ts is generated and gitignored, but tsc needs the
+      # ambient KVNamespace/CloudflareEnv types it declares: without this step
+      # every typecheck on CI fails on names that exist on any machine that
+      # has run cf-typegen. `wrangler types` derives everything from
+      # wrangler.toml offline, no account or secret involved.
+      - name: Generate Cloudflare env types
+        run: npm run cf-typegen
+
       - name: Lint
         run: npm run lint
 
