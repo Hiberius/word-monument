@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import MonumentExplorerLoader from '@/components/monument/MonumentExplorerLoader'
 import MonumentIntro from '@/components/monument/MonumentIntro'
+import { SITE_OG_IMAGE } from '@/lib/site'
 
 // The intro band's counts come from the ledger, so the page can't be frozen at
 // build time. Same 60s window the homepage tally uses.
@@ -16,6 +17,7 @@ export const metadata: Metadata = {
     title: 'The Monument - Word Monument',
     description:
       'Walk the grid, claim your cells, and spell out the words you want permanently placed.',
+    images: [SITE_OG_IMAGE],
   },
 }
 

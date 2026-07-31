@@ -11,6 +11,7 @@ import {
   SITE_URL,
   OPERATOR_NAME,
   CONTACT_EMAIL,
+  SITE_OG_IMAGE,
 } from '@/lib/site'
 import { RESERVATION_TTL_SECONDS, CELL_PRICE_CENTS, MAX_CELLS_PER_TX } from '@/lib/config'
 import { formatUSD } from '@/lib/format'
@@ -31,6 +32,7 @@ export const metadata: Metadata = {
     url: `${SITE_URL}/terms`,
     siteName: SITE_NAME,
     type: 'article',
+    images: [SITE_OG_IMAGE],
   },
 }
 

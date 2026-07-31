@@ -2,7 +2,7 @@
 // promise plainly. Have a lawyer review this copy before public launch.
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { CONTACT_EMAIL, SITE_URL } from '@/lib/site'
+import { CONTACT_EMAIL, SITE_URL, SITE_OG_IMAGE } from '@/lib/site'
 
 const description = 'Why Word Monument exists: one million cells, one dollar a letter, and words that never come down.'
 
@@ -14,6 +14,7 @@ export const metadata: Metadata = {
     url: `${SITE_URL}/about`,
     title: 'About Word Monument',
     description,
+    images: [SITE_OG_IMAGE],
   },
 }
 

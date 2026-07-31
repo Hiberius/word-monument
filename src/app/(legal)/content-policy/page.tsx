@@ -7,7 +7,7 @@
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { SITE_NAME, SITE_URL, CONTACT_EMAIL } from '@/lib/site'
+import { SITE_NAME, SITE_URL, CONTACT_EMAIL, SITE_OG_IMAGE } from '@/lib/site'
 
 const LAST_UPDATED = '2026-07-12'
 
@@ -22,6 +22,7 @@ export const metadata: Metadata = {
     title: `Content Policy · ${SITE_NAME}`,
     description: `What is and isn't allowed on ${SITE_NAME}, how removal works, and how to report content or a copyright infringement.`,
     url: `${SITE_URL}/content-policy`,
+    images: [SITE_OG_IMAGE],
   },
 }
 

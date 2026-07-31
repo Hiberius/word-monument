@@ -23,3 +23,25 @@ export const CONTACT_EMAIL = 'hello@wordmonument.com'
 // The line every share surface, hero, and social card should carry.
 export const SHARE_LINE =
   'I just added my words to a monument that will never come down. Add yours.'
+
+/**
+ * The site-wide social card, restated for any page that declares its own
+ * `openGraph` block.
+ *
+ * app/opengraph-image.tsx covers the root segment, but Next does not merge it
+ * into a child page's `openGraph`: declaring that object at all replaces the
+ * inherited one wholesale, images included. The effect is silent and only
+ * visible when someone shares the link, which is how /monument and /about
+ * ended up unfurling with no image at all, /monument being the single page
+ * most likely to be pasted into a post about this product.
+ *
+ * Any page that sets `openGraph` must therefore spread this in explicitly.
+ * The generated route answers with or without the build hash Next appends, so
+ * the plain path is safe to hardcode.
+ */
+export const SITE_OG_IMAGE = {
+  url: `${SITE_URL}/opengraph-image`,
+  width: 1200,
+  height: 630,
+  alt: `${SITE_NAME}: ${SITE_TAGLINE}`,
+} as const

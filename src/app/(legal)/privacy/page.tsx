@@ -10,6 +10,7 @@ import {
   SITE_URL,
   OPERATOR_NAME,
   CONTACT_EMAIL,
+  SITE_OG_IMAGE,
 } from '@/lib/site'
 
 const LAST_UPDATED = '2026-07-12'
@@ -25,6 +26,7 @@ export const metadata: Metadata = {
     title: `Privacy Policy: ${SITE_NAME}`,
     description: `What ${SITE_NAME} collects, why, and how it's handled, including every sub-processor that touches your data.`,
     url: `${SITE_URL}/privacy`,
+    images: [SITE_OG_IMAGE],
   },
 }
 
