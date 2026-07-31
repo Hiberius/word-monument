@@ -55,13 +55,98 @@ interface WireCell {
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const params = new URL(request.url).searchParams;
+  const url = new URL(request.url);
+  const params = url.searchParams;
   const view = params.get('view');
 
-  if (view === 'tiles') return tileSummariesResponse();
-  if (view === 'cells') return cellsResponse(params);
+  if (view === 'tiles') {
+    return withEdgeCache(`${url.origin}/api/grid?view=tiles`, tileSummariesResponse);
+  }
+
+  if (view === 'cells') {
+    const bounds = parseBounds(params);
+    if (typeof bounds === 'string') return badRequest(bounds);
+    // Keyed on the SNAPPED bounds, never the raw query. The snapping below
+    // already bounds how much work the origin does, but the cache key is what
+    // bounds how many entries exist: keyed on the raw URL, panning by one cell
+    // (or an attacker jittering minX) would mint a brand new entry holding a
+    // byte-identical body, and the hit rate would collapse to zero precisely
+    // when traffic is highest. Param order is fixed here for the same reason.
+    const key =
+      bounds === null
+        ? `${url.origin}/api/grid?view=cells&empty=1`
+        : `${url.origin}/api/grid?view=cells&minX=${bounds.minX}&minY=${bounds.minY}&maxX=${bounds.maxX}&maxY=${bounds.maxY}`;
+    return withEdgeCache(key, () => cellsResponse(bounds));
+  }
 
   return badRequest("view must be 'tiles' or 'cells'");
+}
+
+/**
+ * Serve from, and populate, the Cloudflare edge cache.
+ *
+ * Cloudflare does not cache a Worker's own response just because it carries
+ * s-maxage: without an explicit Cache API write (or a dashboard Cache Rule)
+ * every request recomputes, which was measurably the case here. That is
+ * survivable while the grid is generated demo data and fatal once it is a
+ * Supabase query, because it puts the whole traffic spike back on the
+ * connection pool this route exists to shield.
+ *
+ * Kept in code rather than as a dashboard Cache Rule so it is reviewable in
+ * the repo and cannot be silently lost by someone editing rules in a UI.
+ *
+ * Failures are swallowed on purpose: an unavailable Cache API (next dev, or a
+ * runtime that does not expose caches.default) must degrade to "compute every
+ * time", never to a 500 on the grid's only read path.
+ */
+async function withEdgeCache(
+  cacheKeyUrl: string,
+  compute: () => Promise<NextResponse>
+): Promise<NextResponse> {
+  const cache = await openEdgeCache();
+  if (!cache) return compute();
+
+  const cacheKey = new Request(cacheKeyUrl, { method: 'GET' });
+
+  try {
+    const hit = await cache.match(cacheKey);
+    if (hit) return new NextResponse(hit.body, hit);
+  } catch {
+    // Fall through to a live computation rather than failing the request.
+  }
+
+  const response = await compute();
+
+  // Only successful answers are stored. An edge-cached 502 would freeze a
+  // region of the monument as empty for the whole TTL, and a cached 400 would
+  // pin a bad request's error to a key a good request could later want.
+  if (response.ok) {
+    try {
+      // The Cache API derives its TTL from the response's own s-maxage, so the
+      // two TTL constants above remain the single source of truth.
+      await cache.put(cacheKey, response.clone());
+    } catch {
+      // Storing is best effort; the caller still gets its response.
+    }
+  }
+
+  return response;
+}
+
+interface EdgeCache {
+  match(request: Request): Promise<Response | undefined>;
+  put(request: Request, response: Response): Promise<void>;
+}
+
+async function openEdgeCache(): Promise<EdgeCache | null> {
+  try {
+    // `caches.default` is a Workers extension and is absent from the standard
+    // CacheStorage type, hence the narrow cast rather than a global shim.
+    const store = (globalThis as unknown as { caches?: { default?: EdgeCache } }).caches;
+    return store?.default ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function tileSummariesResponse(): Promise<NextResponse> {
@@ -91,37 +176,49 @@ async function tileSummariesResponse(): Promise<NextResponse> {
   }
 }
 
-async function cellsResponse(params: URLSearchParams): Promise<NextResponse> {
+/**
+ * The snapped bounding box to read, `null` for a viewport entirely off the
+ * grid (a legitimate request with nothing in it, not an error), or a string
+ * carrying the reason the parameters were rejected.
+ *
+ * Split out of cellsResponse so the caller can derive a canonical cache key
+ * from the snapped bounds before deciding whether any work is needed at all.
+ */
+function parseBounds(params: URLSearchParams): CellBounds | null | string {
   const minX = parseCoord(params.get('minX'));
   const minY = parseCoord(params.get('minY'));
   const maxX = parseCoord(params.get('maxX'));
   const maxY = parseCoord(params.get('maxY'));
 
   if (minX === null || minY === null || maxX === null || maxY === null) {
-    return badRequest('minX, minY, maxX and maxY must all be integers');
+    return 'minX, minY, maxX and maxY must all be integers';
   }
 
   if (minX > maxX || minY > maxY) {
-    return badRequest('minX must not exceed maxX, and minY must not exceed maxY');
+    return 'minX must not exceed maxX, and minY must not exceed maxY';
   }
 
-  // A viewport panned entirely off the edge of the grid is a legitimate request
-  // with nothing in it, not an error.
   if (maxX < 0 || maxY < 0 || minX > GRID_SIZE - 1 || minY > GRID_SIZE - 1) {
-    return NextResponse.json({ cells: [] }, { headers: { 'Cache-Control': CELL_CACHE_CONTROL } });
+    return null;
   }
 
   // Clamped to the grid, then widened to whole tile edges so the number of
-  // distinct cache keys stays bounded (400 tiles, not a million pixel-exact
+  // distinct cache keys stays bounded (whole tiles, not a million pixel-exact
   // boxes). Without this, panning by a single cell - or an attacker jittering
   // the bounds - would miss the edge cache on every request and put the origin
   // back in the line of fire.
-  const bounds: CellBounds = {
+  return {
     minX: snapToTileStart(minX),
     minY: snapToTileStart(minY),
     maxX: snapToTileEnd(maxX),
     maxY: snapToTileEnd(maxY),
   };
+}
+
+async function cellsResponse(bounds: CellBounds | null): Promise<NextResponse> {
+  if (bounds === null) {
+    return NextResponse.json({ cells: [] }, { headers: { 'Cache-Control': CELL_CACHE_CONTROL } });
+  }
 
   if (!isSupabaseConfigured()) {
     const cells = demoCellsInBounds(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY).map(
