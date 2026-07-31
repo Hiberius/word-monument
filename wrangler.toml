@@ -41,11 +41,22 @@ bucket_name = "word-monument-cache"
 # or dashboards with an outage affecting reservation rate limiting.
 [[kv_namespaces]]
 binding = "NEXT_INC_CACHE_KV"
-id = "REPLACE_WITH_NEXT_INC_CACHE_KV_NAMESPACE_ID"
+id = "0492364761b945ca8b5325d68c841287"
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
-id = "REPLACE_WITH_RATE_LIMIT_KV_NAMESPACE_ID"
+id = "716fe347f7c54ea99f1bbcf0fe554e99"
+
+# Apex and www both point at this Worker. www exists only so typing it does not
+# hit a DNS failure; custom-worker.ts 308s it onto the apex, which is the single
+# canonical host in metadata, sitemap and robots.
+[[routes]]
+pattern = "wordmonument.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.wordmonument.com"
+custom_domain = true
 
 # Cron sweep is a safety net behind the event-driven checkout.session.expired
 # release path, not the primary reservation-release mechanism. Every 5

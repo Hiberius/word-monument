@@ -40,7 +40,26 @@ interface WorkerEnv {
 const MODERATION_SWEEP_CRON = "11,26,41,56 * * * *";
 
 const worker = {
-  fetch: handler.fetch,
+  /**
+   * Both the apex and www are bound as custom domains (see wrangler.toml
+   * `[[routes]]`) so a visitor typing either one reaches the Worker at all,
+   * rather than getting a DNS failure on www. Collapsing www onto the apex
+   * happens here instead of in Next's middleware because that matcher is
+   * deliberately scoped to /api and /admin for the CSRF origin check: widening
+   * it to every path just to move a hostname would put the payment routes'
+   * origin verification inside the blast radius of a redirect change.
+   *
+   * 308 rather than 301 so a POST that lands on www keeps its method and body
+   * instead of being silently downgraded to a GET.
+   */
+  async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.hostname.startsWith("www.")) {
+      url.hostname = url.hostname.slice("www.".length);
+      return Response.redirect(url.toString(), 308);
+    }
+    return handler.fetch(request, env, ctx);
+  },
 
   async scheduled(event: ScheduledEvent, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
     // Demo/preview deploys ship a placeholder Supabase URL and no service-role
