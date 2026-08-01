@@ -4,6 +4,7 @@ import { SITE_NAME } from '@/lib/site'
 const EXPLORE_LINKS = [
   { href: '/monument', label: 'The monument' },
   { href: '/about', label: 'Our story' },
+  { href: '/notes', label: 'Notes' },
 ]
 
 const LEGAL_LINKS = [
