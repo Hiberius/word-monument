@@ -83,6 +83,17 @@ export default function RootLayout({
         // Next.js fix for that known false-positive applies here.
         suppressHydrationWarning
       >
+        {/* Feed discovery lives here rather than in the metadata export.
+            `alternates` is replaced wholesale by any page that declares its
+            own, and every page here declares a canonical, so a site-wide
+            `alternates.types` would have been silently dropped on all of them.
+            React hoists this link into <head> on every route instead. */}
+        <link
+          rel="alternate"
+          type="application/rss+xml"
+          title={`${SITE_NAME} notes`}
+          href="/feed.xml"
+        />
         <JsonLd />
         <Header />
         <main className="flex-1">{children}</main>
