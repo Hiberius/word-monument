@@ -47,9 +47,9 @@ const SUBPROCESSORS = [
     body: 'Cloudflare serves the site from its global edge network and runs Turnstile, the challenge that verifies you are a person rather than an automated script before a purchase. As the network in front of the site, Cloudflare processes connection metadata (including your IP address in transit) to route requests and block attacks, and may keep short-lived operational logs for security. It also stores, in its KV storage, the address and join date of anyone on the launch notify list, as described above. It does not receive the contents of your payment.',
   },
   {
-    name: 'OpenAI',
+    name: 'Groq',
     role: 'Automated content moderation',
-    body: 'To keep the grid free of hateful, abusive, or illegal content, the assembled text of placed characters is sent to OpenAI’s moderation endpoint for an automated classification. This is text you have chosen to publish on a public wall; it is submitted for the sole purpose of moderation and is not tied to your identity. OpenAI processes it under its API data-usage terms.',
+    body: 'To keep the grid free of hateful, abusive, or illegal content, the assembled text of placed characters is sent to Groq, which runs the Llama Guard safety classifier over it. This is text you have chosen to publish on a public wall; it is submitted for the sole purpose of moderation and is not tied to your identity. Groq processes it under its API terms.',
   },
 ] as const
 
@@ -216,18 +216,19 @@ export default function PrivacyPage() {
           </p>
         </Section>
 
-        <Section title="Automated moderation and OpenAI">
+        <Section title="Automated moderation and Groq">
           <p>
             After a purchase (and periodically thereafter as a safety sweep), the
             assembled text of the characters on the affected cells is sent to{' '}
-            <strong className="text-ink">OpenAI&rsquo;s moderation endpoint</strong>,
-            which returns an automated assessment of whether the content is
-            likely to violate our Content Policy. Flagged content is queued for
-            human review and may be removed.
+            <strong className="text-ink">Groq</strong>, which runs it through
+            Llama Guard, a safety classifier, and returns an automated
+            assessment of whether the content is likely to violate our Content
+            Policy. Flagged content is queued for human review and may be
+            removed.
           </p>
           <p>
             We disclose this plainly because it means user-submitted content
-            leaves our infrastructure: OpenAI receives the text you placed on the
+            leaves our infrastructure: Groq receives the text you placed on the
             public grid. It receives that text alone, for moderation only:
             not your email, not your payment, and not the IP hashes. A quicker,
             self-contained blocklist check also runs before payment; that one

@@ -11,7 +11,7 @@
 #        npx wrangler r2 bucket create word-monument-cache
 #   3. Set every secret listed in .env.example via `wrangler secret put <NAME>`
 #      (SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
-#      TURNSTILE_SECRET_KEY, OPENAI_API_KEY, ADMIN_PASSWORD_HASH,
+#      TURNSTILE_SECRET_KEY, GROQ_API_KEY, ADMIN_PASSWORD_HASH,
 #      ADMIN_SESSION_SECRET, CRON_SECRET, etc.) - never commit real values here.
 #
 # `main` points at ./custom-worker.ts rather than .open-next/worker.js directly
@@ -78,5 +78,5 @@ crons = ["*/5 * * * *", "11,26,41,56 * * * *"]
 
 [vars]
 NEXT_PUBLIC_SITE_URL = "https://wordmonument.com"
-NEXT_PUBLIC_SUPABASE_URL = "https://placeholder-project.supabase.co"
+NEXT_PUBLIC_SUPABASE_URL = "https://ddpvegdjhkebrqddndgc.supabase.co"
 LOG_LEVEL = "info"

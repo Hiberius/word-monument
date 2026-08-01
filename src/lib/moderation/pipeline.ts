@@ -1,6 +1,6 @@
 import { validateCharacter } from '@/lib/moderation/charset';
 import { assembleMessage, assembleRuns, checkBlocklist } from '@/lib/moderation/blocklist';
-import { moderateText } from '@/lib/moderation/openai';
+import { moderateText } from '@/lib/moderation/groq';
 import { getReservationCells } from '@/lib/db/cells';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
@@ -18,7 +18,7 @@ interface PreReservationCell {
 /**
  * Synchronous, cheap gate run at reservation time (before payment). Rejects
  * invalid characters outright, then runs the deterministic blocklist
- * against the assembled text. This does NOT call the OpenAI moderation
+ * against the assembled text. This does NOT call the remote moderation
  * API - that only happens after purchase, in postPurchaseModerationCheck.
  *
  * Takes full {x,y,character} cells, not a bare characters[], and reads them in
@@ -64,7 +64,7 @@ const CROSS_RESERVATION_MARGIN = 24;
  *
  * Fails CLOSED with 'moderation_unavailable' when the query breaks: nothing
  * else in the system ever looks at a term spread across separate purchases (the
- * post-purchase OpenAI pass only ever sees one reservation's own text), so an
+ * post-purchase classifier pass only ever sees one reservation's own text), so an
  * error here is the whole check, not one of two. The reserve route turns that
  * reason into a retryable 503 rather than a content rejection.
  */

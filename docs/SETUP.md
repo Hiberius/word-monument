@@ -17,7 +17,8 @@ Fill in `.env.local` with:
 - Your Supabase project's URL, anon key, and service role key.
 - Test-mode Stripe keys (see below).
 - A Turnstile site key/secret pair (test keys are fine locally).
-- An OpenAI API key, if the content-moderation path needs it locally.
+- A Groq API key, if the content-moderation path needs it locally. Groq's
+  free tier covers this; the classifier is Llama Guard.
 - An `ADMIN_PASSWORD_HASH` generated with `bcryptjs` (never store a plaintext password) and a random `ADMIN_SESSION_SECRET` (32+ bytes) for the admin session cookie.
 - A `CRON_SECRET` value - the shared-secret header the cron routes expect.
 - An `IP_HASH_SECRET` (32+ bytes) - the HMAC key used to pseudonymize IPs. **Required**: the rate limiter throws at startup if it's missing.
@@ -108,7 +109,7 @@ npm run ship
    npx wrangler secret put STRIPE_SECRET_KEY
    npx wrangler secret put STRIPE_WEBHOOK_SECRET
    npx wrangler secret put TURNSTILE_SECRET_KEY
-   npx wrangler secret put OPENAI_API_KEY
+   npx wrangler secret put GROQ_API_KEY
    npx wrangler secret put ADMIN_PASSWORD_HASH
    npx wrangler secret put ADMIN_SESSION_SECRET
    npx wrangler secret put CRON_SECRET

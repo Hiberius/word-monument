@@ -140,7 +140,7 @@ export async function getCellDetail(cellId: number): Promise<any> {
     throw new Error(`getCellDetail: cell_reports query failed: ${reportsError.message}`)
   }
 
-  // moderation_flags is a jsonb COLUMN on cells (the OpenAI category scores
+  // moderation_flags is a jsonb COLUMN on cells (the classifier category flags
   // written by the post-purchase check), not a table. Querying it as a table
   // made PostgREST return an unknown-relation error, so this admin view threw
   // a 500 on every cell instead of ever rendering.

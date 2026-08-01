@@ -1,8 +1,8 @@
 /**
  * Deterministic, synchronous blocklist check used as a fast pre-reservation
- * gate (before the async OpenAI moderation call, which only runs post
+ * gate (before the async remote moderation call, which only runs post
  * purchase). Not exhaustive by design - it exists to reject the obvious
- * cases immediately; the OpenAI moderation pass in `openai.ts` is the
+ * cases immediately; the Llama Guard pass in `groq.ts` is the
  * real backstop.
  */
 
