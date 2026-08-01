@@ -12,6 +12,10 @@ import { readBoundedJson } from '@/lib/security/request-body'
 // timestamp, nothing else. No IP, no hash, no user agent. The IP hash below
 // is used only as a rate-limit key in the separate RATE_LIMIT namespace and
 // is never written alongside the address.
+//
+// Reading the list back needs `wrangler kv key list --remote`; without the flag
+// wrangler reads local dev storage and reports an empty list, which looks
+// exactly like nobody having signed up. See docs/SETUP.md.
 
 const RATE_LIMIT_MAX_REQUESTS = 5
 const RATE_LIMIT_WINDOW_SECONDS = 600

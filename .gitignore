@@ -55,3 +55,8 @@ CLAUDE.md
 PARTIAMO.md
 docs/LAUNCH.md
 operator/
+
+# Only the shared dev-server config is published from .claude/. Anything else
+# the tooling drops in there is local session state, not project files.
+.claude/*
+!.claude/launch.json

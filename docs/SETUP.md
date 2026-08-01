@@ -87,7 +87,7 @@ npm run ship
    the id below is the one bound in `wrangler.toml`):
 
    ```bash
-   npx wrangler kv key list --namespace-id=9ddaee6a0cc546e5afa2db16fd486d60 \
+   npx wrangler kv key list --remote --namespace-id=9ddaee6a0cc546e5afa2db16fd486d60 \
      | python3 -c "import json,sys;[print(k['name'][6:]) for k in json.load(sys.stdin) if k['name'].startswith('email:')]"
    ```
 

@@ -48,6 +48,12 @@ state, which means the inscriptions you see are demonstration data, not sales.
 **No real money has moved through this system.** Claiming switches on when the
 backend is connected.
 
+The strip across the top of the screenshots says so in the product too, and
+takes an email so anyone who wants to be told can be. It is gated on
+`!isSupabaseConfigured()`, which Next inlines at build time, so connecting the
+backend and rebuilding removes it from every page at once rather than leaving a
+dead form behind.
+
 ---
 
 ## The rules
@@ -76,7 +82,7 @@ is a placement problem, not a form: drag the whole inscription somewhere that
 means something, recolor it, drop cells you do not want, and check out. Spaces
 between words are free, so `IN MEMORY OF NONNA` is 15 paid cells, not 18.
 
-![The monument grid with IN MEMORY OF NONNA placed as selected cells. A tray at the bottom lists each cell with its coordinates and character, a RECOLOR ALL row of eight palette swatches, and a summary reading 15 cells selected, $15.00, with Reposition and Review and Checkout buttons.](docs/images/13-placement-flow.png)
+![The monument grid with FOR NONNA placed as selected cells. A tray at the bottom lists each cell with its coordinates and character, a RECOLOR ALL row of eight palette swatches, and a summary reading 8 cells selected, $8.00, with Reposition and Review and Checkout buttons.](docs/images/13-placement-flow.png)
 
 The homepage leads with the monument itself rather than a description of it.
 The counters read `monument_stats`, a single denormalized row bumped inside
@@ -91,7 +97,11 @@ per-purchase card are rendered by the app in its own typefaces rather than
 being static exports. The per-purchase card is a certificate: the inscription,
 the coordinates, the amount, the filing date.
 
-![A share page for a single purchase, showing the inscription, its coordinates on the grid, the amount paid and the date it was filed.](docs/images/08-share-page.png)
+There is no screenshot of a real share page here, because there has not been a
+real purchase to make one from. Visiting `/monument/share/<id>` with an id that
+does not exist renders the not-found state, which is the honest thing to show
+and a useless thing to photograph. The two cards below are real output from the
+running app.
 
 <table>
   <tr>
@@ -129,13 +139,17 @@ radius is different, though. Sharing a lock costs colocated buyers a few
 milliseconds. Sharing a release path would have cost them their cells.
 Migration `0007_reserve_ip_advisory_lock.sql`, if you want to check.
 
-**The reservation TTL and the Stripe session share one clock.** Stripe enforces
-a floor on how soon a Checkout Session may expire, and it is longer than the
-ten-minute hold you would naively write. A short database hold behind a longer
-payment page is a double-sell with extra steps: the hold expires, someone else
-buys the cell, and the first payment still lands. Here the hold is 35 minutes
-and the Checkout Session `expires_at` is set to the same instant, so the two
-windows cannot disagree by construction.
+**The database hold must outlive the payment page, never the other way round.**
+Stripe enforces a floor on how soon a Checkout Session may expire, and it is
+longer than the ten-minute hold you would naively write. A short hold behind a
+longer payment page is a double-sell with extra steps: the hold lapses, someone
+else buys the cell, and the first payment still lands on a cell that is gone.
+So the Checkout Session is given a 35 minute `expires_at`, and the hold behind
+it is then extended to 40: `RESERVATION_TTL_SECONDS + CHECKOUT_HOLD_SLACK_SECONDS`,
+2100 plus 300. The five minutes of slack are the whole point. Align the two
+exactly and a payment landing in the last second of the window races the sweep
+that is releasing the cell at the same instant. The cell stays held until after
+the page it belongs to is already dead.
 
 **The webhook is the only thing that marks cells sold.** It verifies Stripe's
 HMAC signature before parsing anything, and it is idempotent: every event id
@@ -240,7 +254,7 @@ decide what you can read.
 <table>
   <tr>
     <td width="50%"><img src="docs/images/04-monument-default.png" alt="The monument at default zoom, showing scattered inscriptions across a wide area of empty grid with a minimap in the corner."><br><em>Default zoom, Tier 3 with glyphs.</em></td>
-    <td width="50%"><img src="docs/images/05-monument-zoomed.png" alt="The monument zoomed part of the way in, with inscriptions larger and beginning to resolve into readable words."><br><em>Zoomed partway in.</em></td>
+    <td width="50%"><img src="docs/images/05-monument-zoomed.png" alt="The same region zoomed in, with each cell and its glyph roughly twice the size and less of the surrounding grid in frame."><br><em>Zoomed in, between the default and the 64 pixel ceiling.</em></td>
   </tr>
 </table>
 
@@ -271,7 +285,7 @@ actually gets opened.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/09-mobile-home.png" alt="The Word Monument homepage on an iPhone, with the grid banner at the top and the headline A monument built one word at a time below it."></td>
+    <td width="50%"><img src="docs/images/09-mobile-home.png" alt="The Word Monument homepage on an iPhone. The preview strip with its notify form sits under the header, then the grid banner, then the hero headline, whose wording depends on which A/B variant was served."></td>
     <td width="50%"><img src="docs/images/10-mobile-monument.png" alt="The monument grid on an iPhone, zoomed in with large readable letters, zoom controls on the right and the minimap at the bottom."></td>
   </tr>
 </table>
@@ -280,12 +294,15 @@ actually gets opened.
 
 ## Problem 4: the public key could have erased the grid
 
-Row Level Security is deny-all on every base table. The only public read surface
-is one explicit column-allowlist `VIEW`, `cells_public`, so a column added in a
-future migration is invisible to anonymous readers by default rather than
-leaking the moment somebody forgets to write a policy. Everything that writes
-goes through `SECURITY DEFINER` functions called with the service role, from the
-server, never from the browser.
+Row Level Security is deny-all on every base table. The cells themselves are
+readable only through one explicit column-allowlist `VIEW`, `cells_public`, so a
+column added to `cells` in a future migration is invisible to anonymous readers
+by default rather than leaking the moment somebody forgets to write a policy.
+Two aggregate tables, `tile_summary` and `monument_stats`, are also readable
+directly, by a `SELECT`-only grant plus a `SELECT`-only policy: they hold
+nothing but counts, and the grid needs them on the first paint. Everything that
+writes goes through `SECURITY DEFINER` functions called with the service role,
+from the server, never from the browser.
 
 That is the design. The reason it is written that way is a finding, and the
 finding is the most uncomfortable thing in this repo.
@@ -304,15 +321,23 @@ project came to shipping a grid that a stranger with a key printed in the
 JavaScript bundle could have deleted.
 
 There are no third-party analytics, no ad pixels, and no cookies beyond the
-admin session. There is exactly one piece of first-party measurement, and
-pretending otherwise would be a lie you could catch in thirty seconds: the
-homepage A/B tests its headline, so `/api/hero/impression` records which variant
-was shown and `reservation_hero_variant` records which variant a completed
-purchase came from. That is two of the eleven tables and one of the nine routes.
-The comment at the top of that route file calls it low-stakes analytics, which
-is what it is. Buyer IPs are never stored raw, only as HMACs keyed by a
-server-side secret, which is what makes rate limiting and per-IP hold caps
-possible without keeping a list of who visited.
+admin session. Two things are collected first-party, and pretending otherwise
+would be a lie you could catch in thirty seconds.
+
+The homepage A/B tests its headline, so `/api/hero/impression` records which
+variant was shown and `reservation_hero_variant` records which variant a
+completed purchase came from. That is two of the eleven tables and one of the
+eleven routes. The comment at the top of that route file calls it low-stakes
+analytics, which is what it is.
+
+The other is the notify list, which exists only while the site is in preview.
+`/api/waitlist` writes the address you typed and the date, into its own
+Cloudflare KV namespace, and nothing else lands beside it: not your IP, not a
+hash of it, not a user agent.
+
+Buyer IPs are never stored raw anywhere, only as HMACs keyed by a server-side
+secret, which is what makes rate limiting and per-IP hold caps possible without
+keeping a list of who visited.
 
 ---
 
@@ -404,13 +429,13 @@ finding and the issue tracker is open.
 
 | | |
 |---|---|
-| TypeScript and TSX files in `src/` | 114 |
+| TypeScript and TSX files in `src/` | 116 |
 | Lines in `src/` | about 12,000 |
 | SQL migrations | 13, totalling 1,765 lines |
 | Postgres functions | 11 |
 | Tables | 11 |
-| API routes | 9 |
-| React components | 32 |
+| API routes | 11 |
+| React components | 33 |
 | **Runtime dependencies** | **6** |
 | Worker bundle, gzipped | 2.2 MB |
 
@@ -434,7 +459,7 @@ is the cautionary tale that made the bet feel expensive.
 | Database | Supabase Postgres | The concurrency model is row locks and `SECURITY DEFINER` functions, which wants a real Postgres |
 | Payments | Stripe hosted Checkout | Card data never touches this codebase, and the hosted page is the one thing buyers already trust |
 | Styling | Tailwind v4, CSS-first | No config file, tokens live in CSS where the design system does |
-| Cache | R2 plus two KV namespaces plus the edge Cache API | ISR in R2, rate limiting in one KV, the Next cache in another, deliberately separate so an incident in one is not confused with the other in logs |
+| Cache | R2 plus three KV namespaces plus the edge Cache API | ISR in R2, the Next cache in one KV, rate limiting in another, the notify list in a third, deliberately separate so an incident in one is not confused with the others in logs |
 | State | A hand-rolled store on `useSyncExternalStore` | The selection is a Set and a subscribe function; a state library would be more code than the state |
 | Auth | None for buyers, one password for the admin | Accounts are a database of emails waiting to leak, and the product does not need them |
 
@@ -464,13 +489,15 @@ There is deliberately **no purchases table**. `reservation_id` is not cleared on
 sale, so it survives as the purchase-grouping key for success pages, share
 cards and highlights.
 
-The only surface an anonymous client can read is the `cells_public` view, which
-lists its columns explicitly.
+An anonymous client can read the `cells_public` view, which lists its columns
+explicitly, plus the two aggregate tables `tile_summary` and `monument_stats`,
+which hold only counts. Nothing else.
 
 ### Routes and jobs
 
-Nine API routes: `reserve`, `checkout`, `reservation/[id]`, `grid`,
-`webhooks/stripe`, `reports`, `hero/impression`, and two cron endpoints.
+Eleven API routes: `reserve`, `checkout`, `reservation/[id]`, `grid`,
+`webhooks/stripe`, `reports`, `hero/impression`, `waitlist`,
+`share-image/[reservationId]`, and two cron endpoints.
 
 Two cron triggers on the Worker, which is also why `main` points at a
 `custom-worker.ts` rather than OpenNext's generated entry: OpenNext only exports
@@ -527,8 +554,11 @@ $5, a date written out is $10, a short sentence is around $40. Spaces are free.
 
 **What stops it all being deleted next year?**
 Less than you would like, honestly: a public promise, the terms of service, and
-the fact that the entire codebase and its history are in this repo for anyone to
-fork.
+the fact that the entire codebase and its history are readable here, so the
+design outlives the operator even if the domain does not. Note that this repo
+carries no licence file, which means default copyright applies and you may read
+it but not reuse it. That is an omission rather than a position, and it will be
+resolved one way or the other before this is promoted anywhere.
 
 **What happens when it sells out?**
 It closes to new purchases and stays up. Selling out is the finished state, not
@@ -562,7 +592,14 @@ died the moment somebody ran it against a real Postgres.
 
 ---
 
-The commit history is the honest build log, arguments with reviewers included.
+From the second commit onward the history is the real build log, arguments with
+reviewers included: `fix!: revert the per-IP hold release, it could destroy a
+stranger's purchase` is Case One above, landing as it happened. The first commit
+is not. It is a single 148-file, 24,949-line drop, because the history was
+rewritten before publication to strip the author's name and email out of it, and
+squashing was the price of that. Worth saying plainly, since one click on the
+Commits tab shows it.
+
 The author is deliberately anonymous, and the code is public so the promise
 above can be checked rather than trusted. If you write something on the monument
 that means something, I would genuinely like to know the story:
