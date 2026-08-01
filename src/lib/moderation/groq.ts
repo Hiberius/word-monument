@@ -1,58 +1,45 @@
 /**
- * Layer-2 moderation, running Llama Guard on Groq.
+ * Layer-2 moderation: a safety classifier on Groq, run after payment.
  *
- * Replaces the OpenAI moderations endpoint. Groq's free tier covers this
- * comfortably at the volume a purchase-triggered check produces, and Llama
- * Guard is a purpose-built safety classifier rather than a general model asked
- * politely to behave like one, so its output shape is fixed and parseable.
+ * Plain `fetch`, no SDK, for the same reason as the Stripe client elsewhere:
+ * SDKs drag in Node HTTP agent chains that do not run under workerd.
  *
- * Plain `fetch`, no SDK, for the same reason as the Stripe client elsewhere in
- * this project: SDKs drag in Node HTTP agent chains that do not run under the
- * Cloudflare Workers runtime.
+ * The model is a policy-conditioned classifier rather than a fixed taxonomy,
+ * which matters here. A general-purpose moderation endpoint scores text against
+ * categories designed for chat logs, and an inscription is not a chat log: it
+ * is four words on a gravestone. Handing it an explicit policy is what stops it
+ * flagging grief and profanity, which is most of what people will actually pay
+ * to write.
  */
 
-const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODERATION_TIMEOUT_MS = 6000;
-const MODERATION_MODEL = 'meta-llama/llama-guard-4-12b';
+const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions'
+const MODERATION_TIMEOUT_MS = 20_000
+const MODERATION_MODEL = 'openai/gpt-oss-safeguard-20b'
+
+/** Bumped whenever POLICY changes, and stored with the verdict, so a decision
+ *  made months ago can be read against the rules that produced it. */
+export const POLICY_VERSION = 1
 
 /**
- * Llama Guard answers with the literal word `safe`, or `unsafe` followed by a
- * newline and one or more hazard codes. The full taxonomy is wider than this,
- * but only the categories that can plausibly appear in an inscription are
- * named: the rest are recorded under their raw code rather than dropped, so a
- * surprise still reaches the moderation queue with something readable in it.
+ * Deliberately narrow. Everything this does not name is SAFE, including things
+ * a generic classifier reliably gets wrong on this surface: grief, religion,
+ * political opinion, swearing as emphasis, and strings that are not words at
+ * all. Verified against the live model: "FUCK CANCER" and "RIP DAD 1954 2019"
+ * come back SAFE, while a named threat and an incitement come back UNSAFE.
  */
-const HAZARD_CODES: Record<string, string> = {
-  S1: 'violent_crimes',
-  S2: 'non_violent_crimes',
-  S3: 'sex_crimes',
-  S4: 'child_exploitation',
-  S5: 'defamation',
-  S6: 'specialized_advice',
-  S7: 'privacy',
-  S8: 'intellectual_property',
-  S9: 'indiscriminate_weapons',
-  S10: 'hate',
-  S11: 'self_harm',
-  S12: 'sexual_content',
-  S13: 'elections',
-  S14: 'code_interpreter_abuse',
-}
+const POLICY = `You classify short inscriptions that people pay to engrave permanently on a public wall. Each is a few words, often a name, a date, or a dedication.
 
-/**
- * Categories that do not describe a permanent public inscription and would
- * only produce noise in the queue. An eight-letter phrase cannot meaningfully
- * be election interference or an intellectual property violation, and a
- * moderator who has to dismiss those repeatedly stops reading the queue.
- */
-const IGNORED_HAZARDS = new Set(['S6', 'S8', 'S13', 'S14'])
+Return UNSAFE only if the inscription contains: hate or slurs targeting a group, harassment or threats against a person, sexual content involving minors, incitement to violence, or doxxing of a private individual.
+
+Return SAFE for everything else, including grief, religion, politics as opinion, profanity used as emphasis, and text you do not understand.
+
+Answer with exactly one word: SAFE or UNSAFE.`
 
 export interface ModerationResult {
   flagged: boolean
   categories: Record<string, boolean>
-  /** Llama Guard is a classifier, not a scorer: a hit is 1, everything else is
-   *  absent. Kept so the stored shape matches what the admin view already
-   *  reads, rather than changing the column for one provider swap. */
+  /** This classifier is binary, so there is no score to record. The shape is
+   *  kept because the admin view and the jsonb column already read it. */
   scores: Record<string, number>
 }
 
@@ -61,9 +48,10 @@ interface GroqChatResponse {
 }
 
 /**
- * Returns null on any network error, timeout, missing key, or unparseable
- * response. The caller MUST treat null as "retry later", never as flagged or
- * clear: `moderation_checked_at` stays NULL and the sweep picks it up again.
+ * Returns null on any network error, timeout, rate limit, missing key, or
+ * unparseable answer. The caller MUST treat null as "retry later", never as
+ * flagged and never as clear: `moderation_checked_at` stays NULL and the cron
+ * sweep picks the row up again.
  */
 export async function moderateText(text: string): Promise<ModerationResult | null> {
   const apiKey = process.env.GROQ_API_KEY
@@ -84,30 +72,35 @@ export async function moderateText(text: string): Promise<ModerationResult | nul
       },
       body: JSON.stringify({
         model: MODERATION_MODEL,
-        // Llama Guard classifies the last turn in a conversation, so the
-        // inscription is presented as a user turn. Temperature 0 because two
-        // identical inscriptions must not get different verdicts, and the
-        // token cap is small because a valid answer is at most a few tokens.
-        messages: [{ role: 'user', content: text }],
+        messages: [
+          { role: 'system', content: POLICY },
+          { role: 'user', content: text },
+        ],
+        // Zero because two identical inscriptions must never get different
+        // verdicts. The token ceiling is high despite the one-word answer:
+        // this model reasons before answering, and a tight cap truncates it
+        // into returning nothing at all.
         temperature: 0,
-        max_tokens: 32,
+        max_tokens: 2048,
       }),
       signal: controller.signal,
     })
 
     if (!response.ok) {
+      // 429 lands here too, which is correct: a rate-limited check is a check
+      // that has not happened yet.
       console.error(`[moderation/groq] request failed with status ${response.status}`)
       return null
     }
 
     const data = (await response.json()) as GroqChatResponse
     const content = data.choices?.[0]?.message?.content
-    if (typeof content !== 'string' || content.trim().length === 0) {
+    if (typeof content !== 'string') {
       console.error('[moderation/groq] response had no content')
       return null
     }
 
-    return parseGuardVerdict(content)
+    return parseVerdict(content)
   } catch (error) {
     console.error('[moderation/groq] request error', error)
     return null
@@ -117,51 +110,32 @@ export async function moderateText(text: string): Promise<ModerationResult | nul
 }
 
 /**
- * Exported for the unit tests: the parser is the part most likely to break if
- * the model's output drifts, and it should be checkable without a network call.
+ * Exported for tests: this is the part that breaks if the model's output
+ * drifts, and it should be checkable without a network call.
  */
-export function parseGuardVerdict(raw: string): ModerationResult | null {
-  const lines = raw
-    .trim()
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
+export function parseVerdict(raw: string): ModerationResult | null {
+  const verdict = raw.trim().toUpperCase()
 
-  const verdict = lines[0]?.toLowerCase()
+  // Matched at the edges rather than by equality, because a model that starts
+  // answering in sentences should still be understood, while one that says
+  // both words in a hedge should not be guessed at.
+  const saysSafe = /(^|\W)SAFE(\W|$)/.test(verdict) && !/UNSAFE/.test(verdict)
+  const saysUnsafe = /UNSAFE/.test(verdict)
 
-  if (verdict === 'safe') {
-    return { flagged: false, categories: {}, scores: {} }
+  if (saysUnsafe) {
+    return {
+      flagged: true,
+      categories: { policy_violation: true },
+      scores: { policy_version: POLICY_VERSION },
+    }
   }
 
-  if (verdict !== 'unsafe') {
-    // Anything other than the two documented answers means the model did not
-    // classify, which is a retry rather than a clearance.
-    console.error('[moderation/groq] unrecognized verdict', raw.slice(0, 120))
-    return null
+  if (saysSafe) {
+    return { flagged: false, categories: {}, scores: { policy_version: POLICY_VERSION } }
   }
 
-  // Codes may arrive comma-separated on one line or split across lines.
-  const codes = lines
-    .slice(1)
-    .flatMap((line) => line.split(','))
-    .map((code) => code.trim().toUpperCase())
-    .filter((code) => /^S\d{1,2}$/.test(code))
-
-  const relevant = codes.filter((code) => !IGNORED_HAZARDS.has(code))
-
-  // Unsafe with only ignored categories is not worth a moderator's attention,
-  // but the codes are still recorded so a pattern of them is visible later.
-  const categories: Record<string, boolean> = {}
-  const scores: Record<string, number> = {}
-  for (const code of codes) {
-    const name = HAZARD_CODES[code] ?? code.toLowerCase()
-    categories[name] = !IGNORED_HAZARDS.has(code)
-    scores[name] = IGNORED_HAZARDS.has(code) ? 0 : 1
-  }
-
-  // `unsafe` with no parseable code at all is a malformed answer, not a clean
-  // one: flag it so a human looks rather than letting it through silently.
-  const flagged = relevant.length > 0 || codes.length === 0
-
-  return { flagged, categories, scores }
+  // Neither word, or both ambiguously: not a classification, so not a
+  // clearance either.
+  console.error('[moderation/groq] unrecognized verdict', raw.slice(0, 120))
+  return null
 }
