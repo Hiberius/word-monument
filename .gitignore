@@ -60,3 +60,6 @@ operator/
 # the tooling drops in there is local session state, not project files.
 .claude/*
 !.claude/launch.json
+
+# Local Supabase access token, never published
+.supabase-token
