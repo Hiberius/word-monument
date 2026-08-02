@@ -72,9 +72,18 @@ custom_domain = true
 # release path, not the primary reservation-release mechanism. Every 5
 # minutes comfortably beats the 35-minute reservation TTL.
 [triggers]
-# Every 5 minutes: expired-reservation sweep. At :11/:26/:41/:56: moderation
-# retry sweep (pattern must match MODERATION_SWEEP_CRON in custom-worker.ts).
-crons = ["*/5 * * * *", "11,26,41,56 * * * *"]
+# Every 5 minutes on the minute: expired-reservation sweep. Every 5 minutes
+# offset by 2: moderation retry sweep (pattern must match
+# MODERATION_SWEEP_CRON in custom-worker.ts, which dispatches on the exact
+# string, so the two must stay distinguishable).
+#
+# The moderation sweep used to run four times an hour. It is the only thing
+# that actually runs the classifier: the inline call in the webhook is wrapped
+# in Next's after(), which did not fire on this runtime when a real purchase
+# was tested end to end. Until that is understood, this sweep is not a retry
+# path, it is the path, and a quarter hour of unmoderated text sitting on a
+# permanent public wall is too long a window.
+crons = ["*/5 * * * *", "2-57/5 * * * *"]
 
 [vars]
 NEXT_PUBLIC_SITE_URL = "https://wordmonument.com"

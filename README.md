@@ -41,18 +41,22 @@ The site is **live and fully explorable right now**. You can pan the whole
 million-cell grid, zoom to glyph level, select cells, price a word and walk the
 entire flow up to the payment step.
 
-It is **in preview**: Supabase and Stripe are not connected yet, so
-`/api/reserve` returns a preview notice and the grid renders generated
-demonstration content. Every screenshot in this README is the real site in that
-state, which means the inscriptions you see are demonstration data, not sales.
-**No real money has moved through this system.** Claiming switches on when the
-backend is connected.
+The backend is wired up. Supabase holds all one million rows, Stripe is
+connected in **test mode**, and the whole loop has been run once end to end
+against the deployed site: two cells reserved, Turnstile solved, Stripe hosted
+Checkout paid with a test card, the webhook fired, and the cells came back
+`sold` with `purchased_at`, a Stripe session id, and the counters incremented
+in step.
 
-The strip across the top of the screenshots says so in the product too, and
-takes an email so anyone who wants to be told can be. It is gated on
-`!isSupabaseConfigured()`, which Next inlines at build time, so connecting the
-backend and rebuilding removes it from every page at once rather than leaving a
-dead form behind.
+**No real money has moved through this system.** The key on the Worker is a
+`sk_test_` key, so nothing that happens on it can be charged to anyone. Live
+keys go in when the rest of the launch checklist is done.
+
+Some screenshots in this README predate that and show the preview strip that
+used to sit above the fold. It was gated on `!isSupabaseConfigured()`, which
+Next inlines at build time, so connecting the backend removed it from every
+page at once rather than leaving a dead form behind. That is why it is in the
+pictures and not on the site.
 
 ---
 

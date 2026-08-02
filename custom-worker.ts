@@ -37,7 +37,7 @@ interface WorkerEnv {
 
 /** Cron pattern for the moderation retry sweep - must match wrangler.toml
  *  [triggers]. Any other pattern (the 5-minute one) runs the reservation sweep. */
-const MODERATION_SWEEP_CRON = "11,26,41,56 * * * *";
+const MODERATION_SWEEP_CRON = "2-57/5 * * * *";
 
 const worker = {
   /**
@@ -83,8 +83,8 @@ const worker = {
     }
 
     if (event.cron === MODERATION_SWEEP_CRON) {
-      // Retry the layer-2 (OpenAI) moderation check for sold cells whose
-      // first attempt failed (moderation_checked_at still NULL). The logic
+      // Run the layer-2 classifier over sold cells that have not been
+      // checked yet (moderation_checked_at still NULL). The logic
       // lives in the Next route; dispatch it through the worker's own fetch
       // handler with the shared cron secret, so there is exactly one
       // implementation of the sweep.

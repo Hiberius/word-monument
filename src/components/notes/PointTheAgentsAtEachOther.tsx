@@ -80,10 +80,11 @@ export default function PointTheAgentsAtEachOther() {
       </P>
 
       <Aside>
-        The site is live and fully explorable today, in preview: Supabase and Stripe are not
-        connected yet, <C>/api/reserve</C> returns a preview notice, and the grid you are looking at
-        is generated demonstration content. Nothing described below has been run against real
-        money.
+        The site is live and the backend is connected: Postgres holds all one million rows and
+        Stripe is wired up in test mode, so the loop described below has been run end to end
+        against the deployed site rather than a local copy. The key on the Worker is a{' '}
+        <C>sk_test_</C> key, which means nothing that happens on it can be charged to anyone.
+        Nothing here has been run against real money.
       </Aside>
 
       <Figure
@@ -406,11 +407,12 @@ export default function PointTheAgentsAtEachOther() {
       <H2 id="the-honest-ending">The honest ending</H2>
 
       <P>
-        No real money has moved. The preview state described at the top is the current state:
-        Supabase and Stripe are not connected, <C>/api/reserve</C> returns a preview notice, the grid
-        renders generated demonstration content, and claiming switches on when the backend is wired
-        up. Zero cells have been sold to the public. The reservation function that absorbed more
-        attention than anything else has never faced two real buyers at once.
+        No real money has moved. Stripe is connected with a test key, so the one purchase this
+        system has ever completed cost nobody anything: two cells, two dollars that do not exist,
+        paid with a card number Stripe publishes for the purpose. Zero cells have been sold to the
+        public. The reservation function that absorbed more attention than anything else has still
+        never faced two real buyers at once, and a test suite firing twelve processes at the same
+        three rows is not the same thing as a launch.
       </P>
 
       <P>
