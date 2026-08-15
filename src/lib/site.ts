@@ -8,8 +8,10 @@ export const SITE_URL =
 
 export const SITE_TAGLINE = 'A monument built one word at a time.'
 
+// Kept under ~155 characters: this is the search snippet, and the previous
+// version ran to 169 and had its last clause cut off mid-sentence by Google.
 export const SITE_DESCRIPTION =
-  'One dollar. One letter. Yours, forever. Claim a cell on a permanent, million-cell monument. Every cell sells exactly once, and once a word is placed it never comes down.'
+  'One dollar. One letter. Yours, forever. Claim a cell on a permanent million-cell monument. Every cell sells once, and a placed word never comes down.'
 
 // Operator identity shown on the legal pages + the About contact section.
 // The operator is deliberately kept anonymous: the project speaks for

@@ -22,13 +22,13 @@ const LAST_UPDATED = '2026-07-12'
 
 export const metadata: Metadata = {
   title: 'Terms of Service',
-  description: `The terms governing purchases and use of ${SITE_NAME}.`,
+  description: `The terms governing purchases and use of ${SITE_NAME}: what a cell costs, what permanence means, and the limits around it.`,
   alternates: {
     canonical: `${SITE_URL}/terms`,
   },
   openGraph: {
     title: `Terms of Service · ${SITE_NAME}`,
-    description: `The terms governing purchases and use of ${SITE_NAME}.`,
+    description: `The terms governing purchases and use of ${SITE_NAME}: what a cell costs, what permanence means, and the limits around it.`,
     url: `${SITE_URL}/terms`,
     siteName: SITE_NAME,
     type: 'article',
