@@ -47,9 +47,17 @@ export default function LiveCounters({ stats }: LiveCountersProps) {
           <AnimatedCounter value={shown.cellsSold} />
         </StatRow>
 
-        <StatRow label="Written in stone so far">
-          <AnimatedCounter value={shown.totalRevenueCents / 100} format={USD_FORMAT} />
-        </StatRow>
+        {/* Revenue counts real purchases only. The founding inscriptions were
+            placed by us and nobody paid for them (see /about), so this figure
+            legitimately reads zero while the grid already shows 72 filled
+            cells. Printed side by side those two numbers just look like a
+            broken widget, so the row stays hidden until the first sale makes
+            it say something. */}
+        {stats.totalRevenueCents > 0 && (
+          <StatRow label="Written in stone so far">
+            <AnimatedCounter value={shown.totalRevenueCents / 100} format={USD_FORMAT} />
+          </StatRow>
+        )}
 
         <StatRow
           emphasized

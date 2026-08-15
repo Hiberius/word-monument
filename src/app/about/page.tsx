@@ -125,6 +125,32 @@ export default function AboutPage() {
 
       <div className="mt-14 border-t border-rule pt-10">
         <p className="font-mono-grid text-xs uppercase tracking-[0.2em] text-ink-60">
+          The first words
+        </p>
+        <h2 className="mt-3 font-headline text-3xl text-ink">
+          Seventy-two cells nobody paid for.
+        </h2>
+        <div className="mt-6 space-y-6 font-body text-lg leading-relaxed text-ink-60">
+          <p>
+            An empty wall tells you nothing about what a wall is for, so we
+            wrote the first lines ourselves. Seven short inscriptions near the
+            centre, seventy-two characters in total, placed by us and not
+            bought by anyone. They are the only cells on the monument that were
+            not paid for, they are marked as ours in the database, and no money
+            is counted against them: the amount raised you see on the home page
+            is real revenue from real purchases only, which is why it can read
+            zero while the grid already has words on it.
+          </p>
+          <p>
+            We could have quietly passed them off as strangers&rsquo; writing.
+            A site whose entire promise is that what you read here is genuine
+            and stays genuine does not get to start with a lie on the wall.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-14 border-t border-rule pt-10">
+        <p className="font-mono-grid text-xs uppercase tracking-[0.2em] text-ink-60">
           Contact
         </p>
         <h2 className="mt-3 font-headline text-3xl text-ink">Who&rsquo;s behind this.</h2>
