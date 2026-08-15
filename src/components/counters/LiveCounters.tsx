@@ -42,7 +42,14 @@ export default function LiveCounters({ stats }: LiveCountersProps) {
         </p>
       </div>
 
-      <div className="flex-1 divide-y divide-parchment/15">
+      {/* flex-col here, and flex-1 on each row below, so the rows share out
+          whatever height the card is stretched to by lg:items-stretch. Without
+          it the rows keep their intrinsic height and the shortfall shows up as
+          a slab of empty ink at the bottom of the card: 95px of it once the
+          revenue row is hidden, which is exactly what it looked like, a broken
+          panel. This also keeps the card right whether there are two rows or
+          three. */}
+      <div className="flex flex-1 flex-col divide-y divide-parchment/15">
         <StatRow label="Cells claimed">
           <AnimatedCounter value={shown.cellsSold} />
         </StatRow>
@@ -83,7 +90,11 @@ function StatRow({
   children: React.ReactNode
 }) {
   return (
-    <div className={`flex flex-col gap-1.5 px-6 py-5 ${emphasized ? 'bg-stamp-red' : ''}`}>
+    <div
+      className={`flex flex-1 flex-col justify-center gap-1.5 px-6 py-5 ${
+        emphasized ? 'bg-stamp-red' : ''
+      }`}
+    >
       <p className="font-mono-grid text-3xl text-parchment sm:text-4xl">{children}</p>
       <p
         className={`font-mono-grid text-xs uppercase tracking-[0.2em] ${
