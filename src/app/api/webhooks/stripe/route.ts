@@ -8,7 +8,11 @@ import { completePurchase, releaseReservation } from '@/lib/db/cells'
 import { getSupabaseAdmin } from '@/lib/supabase/admin'
 import { postPurchaseModerationCheck } from '@/lib/moderation/pipeline'
 import { recordHeroConversion } from '@/lib/db/heroVariants'
-import { CELL_PRICE_CENTS, CHECKOUT_HOLD_SLACK_SECONDS } from '@/lib/config'
+import {
+  CELL_PRICE_CENTS,
+  CHECKOUT_HOLD_SLACK_SECONDS,
+  RELEASE_BOUND_TOLERANCE_SECONDS,
+} from '@/lib/config'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -178,9 +182,16 @@ async function handleCheckoutSessionExpired(event: any): Promise<void> {
   // hold, turning every expiry event into a no-op and leaving abandoned carts
   // to the 5-minute sweep. A NEWER session pushes reserved_until a further full
   // TTL out, well beyond this window, so the stale-session guard still holds.
+  //
+  // RELEASE_BOUND_TOLERANCE_SECONDS is what makes the comparison actually fire:
+  // expires_at is whole seconds and reserved_until has microseconds, so without
+  // it the bound sits a few hundred milliseconds short of every hold it is
+  // meant to match.
   const expiresAt: number | null = typeof session.expires_at === 'number' ? session.expires_at : null
   const releaseBound = expiresAt
-    ? new Date((expiresAt + CHECKOUT_HOLD_SLACK_SECONDS) * 1000).toISOString()
+    ? new Date(
+        (expiresAt + CHECKOUT_HOLD_SLACK_SECONDS + RELEASE_BOUND_TOLERANCE_SECONDS) * 1000
+      ).toISOString()
     : null
   await releaseReservation(reservationId, releaseBound)
 }
